@@ -1,0 +1,14 @@
+.env
+*.pyc
+__pycache__/
+*.exe
+*.spec
+dist/
+build/
+pending_messages.json
+api_last_status.txt
+last_api_notification.txt
+config_notifications.txt
+debug_*.py
+send_test_*.py
+*.log

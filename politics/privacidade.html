@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Política de Privacidade - Condomínio Village Liberdade</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #FF7A00;
+            --bg: #0a0a0b;
+            --card-bg: rgba(255, 255, 255, 0.03);
+            --border: rgba(255, 255, 255, 0.1);
+            --text: #e0e0e0;
+            --text-muted: #a0a0a0;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            overflow-x: hidden;
+            background-image: url('bg.png');
+            background-size: cover;
+            background-attachment: fixed;
+            background-position: center;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at 50% 50%, rgba(10, 10, 11, 0.4) 0%, rgba(10, 10, 11, 0.9) 100%);
+            z-index: -1;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 60px auto;
+            padding: 0 20px;
+        }
+
+        .glass-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 40px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 50px;
+        }
+
+        .logo {
+            width: 120px;
+            height: auto;
+            border-radius: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #fff 0%, var(--primary) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+
+        section {
+            margin-bottom: 40px;
+        }
+
+        h2 {
+            font-size: 1.5rem;
+            color: var(--primary);
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        h2::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: linear-gradient(90deg, var(--border), transparent);
+        }
+
+        p {
+            margin-bottom: 15px;
+            color: var(--text-muted);
+        }
+
+        ul {
+            list-style: none;
+            margin-bottom: 15px;
+        }
+
+        li {
+            margin-bottom: 10px;
+            padding-left: 20px;
+            position: relative;
+            color: var(--text-muted);
+        }
+
+        li::before {
+            content: '→';
+            position: absolute;
+            left: 0;
+            color: var(--primary);
+        }
+
+        .footer-info {
+            margin-top: 50px;
+            padding-top: 30px;
+            border-top: 1px solid var(--border);
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 30px;
+        }
+
+        .info-item h3 {
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--primary);
+            margin-bottom: 10px;
+        }
+
+        .info-item p {
+            font-size: 0.95rem;
+            margin-bottom: 0;
+        }
+
+        .whatsapp-alert {
+            margin-top: 40px;
+            background: rgba(255, 122, 0, 0.1);
+            border: 1px solid var(--primary);
+            padding: 20px;
+            border-radius: 16px;
+            text-align: center;
+            font-size: 0.9rem;
+            color: var(--text);
+        }
+
+        .nav-links {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .nav-links a {
+            color: var(--text-muted);
+            text-decoration: none;
+            margin: 0 15px;
+            font-size: 0.9rem;
+            transition: color 0.3s;
+        }
+
+        .nav-links a:hover {
+            color: var(--primary);
+        }
+
+        .nav-links a.active {
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        @media (max-width: 600px) {
+            .glass-card {
+                padding: 25px;
+            }
+            h1 {
+                font-size: 1.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <nav class="nav-links">
+            <a href="privacidade.html" class="active">Privacidade</a>
+            <a href="termos.html">Termos de Uso</a>
+        </nav>
+
+        <header>
+            <img src="logo_square.jpg" alt="Village Liberdade Logo" class="logo">
+            <h1>Privacidade</h1>
+            <p class="subtitle">CONDOMINIO DO RESIDENCIAL VILLAGE LIBERDADE</p>
+        </header>
+
+        <div class="glass-card">
+            <section>
+                <h2>1. Coleta de Dados</h2>
+                <p>O Condomínio Residencial Village Liberdade coleta apenas os dados estritamente necessários para o gerenciamento de encomendas e reservas de áreas comuns, visando a segurança e organização dos moradores.</p>
+                <ul>
+                    <li>Nome completo do morador</li>
+                    <li>Número do bloco e apartamento</li>
+                    <li>Número de telefone celular (para notificações via WhatsApp)</li>
+                    <li>Dados de encomendas (rastreio, transportadora, data de chegada)</li>
+                    <li>Registros de uso de áreas comuns (data, horário, convidados)</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>2. Uso das Informações</h2>
+                <p>As informações coletadas são utilizadas exclusivamente para:</p>
+                <ul>
+                    <li>Notificar o morador sobre a chegada de novas encomendas</li>
+                    <li>Enviar lembretes de encomendas pendentes de retirada</li>
+                    <li>Confirmar e gerenciar reservas (quadra, piscina, churrasqueira, vaga)</li>
+                    <li>Manter o registro histórico de retiradas e ocupação de áreas</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>3. Notificações Automatizadas</h2>
+                <p>Nosso sistema utiliza a API Oficial do WhatsApp Business para o envio de mensagens automáticas. Estas mensagens são enviadas a partir do número oficial do condomínio.</p>
+                <div class="whatsapp-alert">
+                    <strong>Atenção:</strong> O número +55 31 92002-3402 não responde a mensagens nem atende a ligações. Ele é destinado exclusivamente a disparos automáticos.
+                </div>
+            </section>
+
+            <section>
+                <h2>4. Segurança e Retenção</h2>
+                <p>Implementamos medidas técnicas para proteger seus dados contra acessos não autorizados. Os dados são armazenados localmente no sistema da portaria e acessados apenas por pessoal autorizado.</p>
+            </section>
+
+            <div class="footer-info">
+                <div class="info-item">
+                    <h3>Instituição</h3>
+                    <p>Condomínio do Residencial Village Liberdade</p>
+                    <p>CNPJ: 04.385.663/0001-22</p>
+                </div>
+                <div class="info-item">
+                    <h3>Endereço</h3>
+                    <p>Rua flor de fogo, 65, Liberdade</p>
+                    <p>Belo Horizonte, MG</p>
+                </div>
+                <div class="info-item">
+                    <h3>Contato</h3>
+                    <p>villageportaria65@gmail.com</p>
+                    <p>WhatsApp (Auto): +55 31 92002-3402</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
