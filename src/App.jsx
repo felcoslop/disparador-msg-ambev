@@ -1,13 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { LogIn, UserPlus, LogOut, Settings, Upload, Send, History, AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { LogIn, UserPlus, LogOut, Settings, Upload, Send, History, AlertCircle, CheckCircle2, Eye, EyeOff, Play, Pause, RotateCcw, X, List } from 'lucide-react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 
 // --- Global Constants ---
-// --- Global Constants ---
-// Default user removed for security
-// const DEFAULT_USER = { ... };
-
 const AMBEV_COLORS = {
     blue: '#280091',
     green: '#00a276',
@@ -22,14 +19,73 @@ const REQUIRED_COLUMNS = [
     { id: 'order_number', label: 'Nº do Pedido' }
 ];
 
+// --- WebSocket Hook ---
+function useWebSocket(userId, onMessage) {
+    const wsRef = useRef(null);
+    const reconnectTimeoutRef = useRef(null);
+
+    const connect = useCallback(() => {
+        if (!userId) return;
+
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}`;
+
+        wsRef.current = new WebSocket(wsUrl);
+
+        wsRef.current.onopen = () => {
+            console.log('[WS] Connected');
+            wsRef.current.send(JSON.stringify({ type: 'auth', userId }));
+        };
+
+        wsRef.current.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                onMessage(data);
+            } catch (e) {
+                console.error('[WS] Parse error:', e);
+            }
+        };
+
+        wsRef.current.onclose = () => {
+            console.log('[WS] Disconnected, reconnecting...');
+            reconnectTimeoutRef.current = setTimeout(connect, 3000);
+        };
+
+        wsRef.current.onerror = (err) => {
+            console.error('[WS] Error:', err);
+        };
+    }, [userId, onMessage]);
+
+    useEffect(() => {
+        connect();
+        return () => {
+            if (wsRef.current) wsRef.current.close();
+            if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+        };
+    }, [connect]);
+
+    return wsRef;
+}
+
+// --- Main App Component ---
 export default function App() {
-    // Session Persistence: Load 'ambev_session' to stay logged in
+    return (
+        <BrowserRouter>
+            <AppContent />
+        </BrowserRouter>
+    );
+}
+
+function AppContent() {
+    const navigate = useNavigate();
+    const location = useLocation();
+
+    // Session: now stores full user object with id
     const [user, setUser] = useState(() => {
         const saved = localStorage.getItem('ambev_session');
         return saved ? JSON.parse(saved) : null;
     });
 
-    // Persist session whenever user changes
     useEffect(() => {
         if (user) {
             localStorage.setItem('ambev_session', JSON.stringify(user));
@@ -38,15 +94,12 @@ export default function App() {
         }
     }, [user]);
 
-    const [view, setView] = useState(user ? 'dashboard' : 'login'); // Auto-redirect if logged in
-
-    // State - Initialized as empty, populated ONLY by API (Server synchronization)
-    const [users, setUsers] = useState([]);
-    const [config, setConfig] = useState({ token: '', phoneId: '', wabaId: '' });
-    const [history, setHistory] = useState([]);
+    const [config, setConfig] = useState({ token: '', phoneId: '', wabaId: '', templateName: '', mapping: {} });
+    const [dispatches, setDispatches] = useState([]);
+    const [activeDispatch, setActiveDispatch] = useState(null);
     const [receivedMessages, setReceivedMessages] = useState([]);
 
-    // UI State (not persisted)
+    // UI State
     const [campaignData, setCampaignData] = useState(null);
     const [headers, setHeaders] = useState([]);
     const [mapping, setMapping] = useState(() => {
@@ -57,82 +110,107 @@ export default function App() {
     });
     const [templatePreview, setTemplatePreview] = useState(null);
     const [dates, setDates] = useState({ old: '', new: '' });
-    const [sendingStatus, setSendingStatus] = useState('idle');
-    const [activeTab, setActiveTab] = useState('disparos');
     const [activeContact, setActiveContact] = useState(null);
-    const [progress, setProgress] = useState({ current: 0, total: 0 });
-    const [logs, setLogs] = useState([]);
-    const [errors, setErrors] = useState([]);
     const [showToken, setShowToken] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [toasts, setToasts] = useState([]);
 
-    const addToast = (message, type = 'info') => {
+    const addToast = useCallback((message, type = 'info') => {
         const id = Date.now();
         setToasts(prev => [...prev, { id, message, type }]);
         setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
-    };
+    }, []);
 
-    // --- API SYNC + HYBRID BACKUP ---
-    const fetchDb = async () => {
+    // WebSocket message handler
+    const handleWsMessage = useCallback((data) => {
+        const { event, data: payload } = data;
+
+        if (event === 'dispatch:progress') {
+            setActiveDispatch(prev => (prev && prev.id === payload.dispatchId) ? {
+                ...prev,
+                currentIndex: payload.currentIndex,
+                successCount: payload.successCount,
+                errorCount: payload.errorCount,
+                lastLog: payload.lastLog
+            } : prev);
+        } else if (event === 'dispatch:status') {
+            setActiveDispatch(prev => (prev && prev.id === payload.dispatchId) ? { ...prev, status: payload.status } : prev);
+            if (payload.status === 'completed') {
+                addToast('Disparo concluído!', 'success');
+            }
+        } else if (event === 'dispatch:complete') {
+            fetchDispatches();
+        } else if (event === 'message:received') {
+            fetchMessages();
+        }
+    }, [addToast]);
+
+    // Connect WebSocket
+    useWebSocket(user?.id, handleWsMessage);
+
+    // Fetch functions
+    const fetchUserData = useCallback(async () => {
+        if (!user?.id) return;
         try {
-            // If logged in, fetch specific user config
-            const emailParam = user && user.email ? `?email=${encodeURIComponent(user.email)}` : '';
-            const res = await fetch(`/api/db${emailParam}`);
-
+            const res = await fetch(`/api/user/${user.id}`);
             if (res.ok) {
                 const data = await res.json();
-
-                // Server is master. Update state.
-                if (data.users && data.users.length) {
-                    setUsers(data.users);
-                }
-
-                // Only update config if we got one (meaning we are logged in or server sent default)
                 if (data.config) {
                     setConfig(data.config);
-
                     setTemplateName(data.config.templateName || '');
                     setMapping(data.config.mapping || {});
                 }
-
-                if (data.history) {
-                    setHistory(data.history);
-                }
-                setReceivedMessages(data.receivedMessages || []);
-                return data;
             }
         } catch (err) {
-            console.warn("Server unavailable, using local backup.");
-        } finally {
+            console.error('Failed to fetch user data:', err);
+        }
+    }, [user?.id]);
+
+    const fetchDispatches = useCallback(async () => {
+        if (!user?.id) return;
+        try {
+            const res = await fetch(`/api/dispatch/${user.id}`);
+            if (res.ok) {
+                const data = await res.json();
+                setDispatches(data);
+
+                // Check for running dispatch
+                const running = data.find(d => d.status === 'running' || d.status === 'paused');
+                if (running) {
+                    const detailRes = await fetch(`/api/dispatch/${user.id}/${running.id}`);
+                    if (detailRes.ok) {
+                        const detail = await detailRes.json();
+                        setActiveDispatch(detail);
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('Failed to fetch dispatches:', err);
+        }
+    }, [user?.id]);
+
+    const fetchMessages = useCallback(async () => {
+        try {
+            const res = await fetch('/api/messages');
+            if (res.ok) {
+                setReceivedMessages(await res.json());
+            }
+        } catch (err) {
+            console.error('Failed to fetch messages:', err);
+        }
+    }, []);
+
+    // Load data on mount/login
+    useEffect(() => {
+        if (user?.id) {
+            Promise.all([fetchUserData(), fetchDispatches(), fetchMessages()])
+                .finally(() => setIsLoading(false));
+        } else {
             setIsLoading(false);
         }
-        return null;
-    };
+    }, [user?.id, fetchUserData, fetchDispatches, fetchMessages]);
 
-    const saveDb = async (newData) => {
-        // 2. TRY SERVER SYNC
-        try {
-            const currentData = {
-                users: newData.users || users,
-                config: newData.config || config,
-                history: newData.history || history,
-                receivedMessages: newData.receivedMessages || receivedMessages,
-                email: user?.email
-            };
-
-            await fetch('/api/db', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(currentData)
-            });
-        } catch (err) {
-            console.error("Failed to sync to server (saved locally).", err);
-            // Non-blocking error. User is safe locally.
-        }
-    };
-
-    // Persistence Effects for UI State
+    // Persist UI state
     useEffect(() => {
         localStorage.setItem('ambev_template_name_backup', templateName);
     }, [templateName]);
@@ -141,59 +219,63 @@ export default function App() {
         localStorage.setItem('ambev_mapping_backup', JSON.stringify(mapping));
     }, [mapping]);
 
-    // Load data on mount
-    useEffect(() => {
-        fetchDb();
-        // Periodically refresh received messages every 10s
-        const interval = setInterval(fetchDb, 10000);
-        return () => clearInterval(interval);
-    }, [user?.email]);
+    const handleLogin = async (email, password) => {
+        try {
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: email.trim().toLowerCase(), password: password.trim() })
+            });
 
+            const data = await res.json();
 
-    const handleLogin = (email, password) => {
-        // Simple standardization
-        const cleanEmail = email.trim().toLowerCase();
-        const cleanPass = password.trim();
-
-        // Database Inspection
-        const userInDb = users.find(u => u.email.trim().toLowerCase() === cleanEmail);
-
-        if (userInDb && userInDb.password.trim() === cleanPass) {
-            setUser(userInDb);
-            setView('dashboard');
-            addToast(`Bem-vindo, ${userInDb.email}!`, 'success');
-        } else {
-            addToast('E-mail ou senha incorretos.', 'error');
+            if (res.ok && data.success) {
+                setUser(data.user);
+                if (data.user.config) {
+                    setConfig(data.user.config);
+                    setTemplateName(data.user.config.templateName || '');
+                    setMapping(data.user.config.mapping || {});
+                }
+                addToast(`Bem-vindo, ${data.user.email}!`, 'success');
+                navigate('/home');
+            } else {
+                addToast(data.error || 'E-mail ou senha incorretos.', 'error');
+            }
+        } catch (err) {
+            addToast('Erro de conexão com o servidor.', 'error');
         }
     };
 
     const handleRegister = async (email, password) => {
-        const sterilize = (str) => str
-            .replace(/[\s\u200B-\u200D\uFEFF]/g, '')
-            .replace(/[\u2013\u2014]/g, '-');
-
-        const cleanEmail = sterilize(email).toLowerCase();
-        const cleanPass = sterilize(password);
-
-        if (users.find(u => sterilize(u.email).toLowerCase() === cleanEmail)) {
-            alert('E-mail já cadastrado');
-            return;
-        }
-        const updatedUsers = [...users, { email: cleanEmail, password: cleanPass }];
-        setUsers(updatedUsers);
-
-        // SQLite Register
         try {
-            await fetch('/api/register', {
+            const res = await fetch('/api/register', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: cleanEmail, password: cleanPass })
+                body: JSON.stringify({
+                    email: email.trim().toLowerCase(),
+                    password: password.trim()
+                })
             });
-            addToast('Usuário cadastrado com sucesso!', 'success');
-            setView('login');
-        } catch (e) {
-            addToast('Erro ao realizar cadastro. Tente novamente.', 'error');
+
+            const data = await res.json();
+
+            if (res.ok && data.success) {
+                addToast('Usuário cadastrado com sucesso!', 'success');
+                navigate('/login');
+            } else {
+                addToast(data.error || 'Erro ao cadastrar.', 'error');
+            }
+        } catch (err) {
+            addToast('Erro de conexão com o servidor.', 'error');
         }
+    };
+
+    const handleLogout = () => {
+        setUser(null);
+        setConfig({ token: '', phoneId: '', wabaId: '', templateName: '', mapping: {} });
+        setActiveDispatch(null);
+        setDispatches([]);
+        navigate('/login');
     };
 
     if (isLoading) {
@@ -230,55 +312,49 @@ export default function App() {
         );
     }
 
-    if (!user) {
-        return view === 'login' ? (
-            <LoginView onLogin={handleLogin} onSwitch={() => setView('register')} onResetApp={resetApp} />
-        ) : (
-            <RegisterView onRegister={handleRegister} onSwitch={() => setView('login')} />
-        );
-    }
+    const commonProps = {
+        user,
+        onLogout: handleLogout,
+        config,
+        setConfig,
+        dispatches,
+        setDispatches,
+        activeDispatch,
+        setActiveDispatch,
+        receivedMessages,
+        fetchDispatches,
+        campaignData,
+        setCampaignData,
+        headers,
+        setHeaders,
+        mapping,
+        setMapping,
+        templateName,
+        setTemplateName,
+        templatePreview,
+        setTemplatePreview,
+        dates,
+        setDates,
+        setActiveTab: (tab) => navigate(`/${tab === 'disparos' ? 'home' : tab === 'historico' ? 'history' : tab === 'recebidas' ? 'received' : 'settings'}`),
+        activeContact,
+        setActiveContact,
+        showToken,
+        setShowToken,
+        addToast
+    };
 
     return (
         <>
-            <Dashboard
-                user={user}
-                onLogout={() => setUser(null)}
-                config={config}
-                setConfig={setConfig}
-                history={history}
-                setHistory={setHistory}
-                receivedMessages={receivedMessages}
-                setReceivedMessages={setReceivedMessages}
-                saveDb={saveDb}
-                campaignData={campaignData}
-                setCampaignData={setCampaignData}
-                headers={headers}
-                setHeaders={setHeaders}
-                mapping={mapping}
-                setMapping={setMapping}
-                templateName={templateName}
-                setTemplateName={setTemplateName}
-                templatePreview={templatePreview}
-                setTemplatePreview={setTemplatePreview}
-                dates={dates}
-                setDates={setDates}
-                sendingStatus={sendingStatus}
-                setSendingStatus={setSendingStatus}
-                activeTab={activeTab}
-                setActiveTab={setActiveTab}
-                activeContact={activeContact}
-                setActiveContact={setActiveContact}
-                progress={progress}
-                setProgress={setProgress}
-                logs={logs}
-                setLogs={setLogs}
-                errors={errors}
-                setErrors={setErrors}
-                showToken={showToken}
-                setShowToken={setShowToken}
-                addToast={addToast}
-            />
             <Toast toasts={toasts} />
+            <Routes>
+                <Route path="/login" element={!user ? <LoginView onLogin={handleLogin} onSwitch={() => navigate('/register')} /> : <Navigate to="/home" />} />
+                <Route path="/register" element={!user ? <RegisterView onRegister={handleRegister} onSwitch={() => navigate('/login')} /> : <Navigate to="/home" />} />
+                <Route path="/home" element={user ? <Dashboard {...commonProps} activeTab="disparos" /> : <Navigate to="/login" />} />
+                <Route path="/history" element={user ? <Dashboard {...commonProps} activeTab="historico" /> : <Navigate to="/login" />} />
+                <Route path="/received" element={user ? <Dashboard {...commonProps} activeTab="recebidas" /> : <Navigate to="/login" />} />
+                <Route path="/settings" element={user ? <Dashboard {...commonProps} activeTab="ajustes" /> : <Navigate to="/login" />} />
+                <Route path="*" element={<Navigate to={user ? "/home" : "/login"} />} />
+            </Routes>
         </>
     );
 }
@@ -292,10 +368,11 @@ function Toast({ toasts }) {
             position: 'fixed',
             top: '20px',
             right: '20px',
-            zIndex: 9999,
+            zIndex: 99999,
             display: 'flex',
             flexDirection: 'column',
-            gap: '10px'
+            gap: '10px',
+            pointerEvents: 'none'
         }}>
             {toasts.map(toast => (
                 <div key={toast.id} style={{
@@ -306,31 +383,31 @@ function Toast({ toasts }) {
                         toast.type === 'success' ? '#00a276' :
                             '#280091',
                     color: '#fff',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                    boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '12px',
-                    animation: 'slideIn 0.3s ease-out'
+                    animation: 'slideInToast 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards',
+                    pointerEvents: 'auto'
                 }}>
                     {toast.type === 'error' ? <AlertCircle size={20} /> :
                         toast.type === 'success' ? <CheckCircle2 size={20} /> :
                             <AlertCircle size={20} />}
-                    <span style={{ fontSize: '14px', fontWeight: 500 }}>{toast.message}</span>
+                    <span style={{ fontSize: '14px', fontWeight: 600 }}>{toast.message}</span>
                 </div>
             ))}
             <style>{`
-                @keyframes slideIn {
-                    from { transform: translateX(100%); opacity: 0; }
-                    to { transform: translateX(0); opacity: 1; }
+                @keyframes slideInToast {
+                    0% { transform: translateX(120%); opacity: 0; }
+                    100% { transform: translateX(0); opacity: 1; }
                 }
             `}</style>
         </div>
     );
 }
 
-// --- Views ---
-
-function LoginView({ onLogin, onSwitch, onResetApp }) {
+// --- Login/Register Views (Omitted for brevity, assume they are the same as before or updated via replace) ---
+function LoginView({ onLogin, onSwitch }) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
@@ -344,34 +421,13 @@ function LoginView({ onLogin, onSwitch, onResetApp }) {
                 <form onSubmit={(e) => { e.preventDefault(); onLogin(email, password); }}>
                     <div className="input-group">
                         <label>E-mail</label>
-                        <input
-                            type="email"
-                            value={email}
-                            onChange={e => setEmail(e.target.value)}
-                            required
-                            placeholder="exemplo@ab-inbev.com"
-                            spellCheck="false"
-                            autoCorrect="off"
-                            autoCapitalize="none"
-                        />
+                        <input type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="exemplo@ab-inbev.com" />
                     </div>
                     <div className="input-group">
                         <label>Senha</label>
                         <div className="input-with-btn">
-                            <input
-                                type={showPassword ? "text" : "password"}
-                                value={password}
-                                onChange={e => setPassword(e.target.value)}
-                                required
-                                spellCheck="false"
-                                autoCorrect="off"
-                                autoCapitalize="none"
-                            />
-                            <button
-                                type="button"
-                                className="btn-secondary"
-                                onClick={() => setShowPassword(!showPassword)}
-                            >
+                            <input type={showPassword ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)} required />
+                            <button type="button" className="btn-secondary" onClick={() => setShowPassword(!showPassword)}>
                                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                             </button>
                         </div>
@@ -379,70 +435,18 @@ function LoginView({ onLogin, onSwitch, onResetApp }) {
                     <button type="submit" className="btn-primary w-full">Entrar</button>
                 </form>
                 <button className="btn-link" onClick={onSwitch}>Criar nova conta</button>
-                <div style={{ marginTop: '2rem', borderTop: '1px solid #eee', paddingTop: '1rem' }}>
-                    <button
-                        style={{ fontSize: '0.7rem', color: '#999', background: 'none', border: 'none', cursor: 'pointer' }}
-                        onClick={onResetApp}
-                    >
-                        Resetar Aplicativo (Emergência)
-                    </button>
-                </div>
             </div>
             <style>{`
-        .auth-container {
-          height: 100vh;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: var(--ambev-gradient);
-        }
-        .auth-card {
-          width: 90%;
-          max-width: 400px;
-          text-align: center;
-        }
-        .logo-text {
-          font-family: var(--font-display);
-          font-weight: 700;
-          font-size: 3rem;
-          color: var(--ambev-blue);
-          margin-bottom: 0.5rem;
-          letter-spacing: -2px;
-        }
-        .subtitle {
-          color: #666;
-          margin-bottom: 2rem;
-          font-size: 0.9rem;
-        }
-        .input-group {
-          text-align: left;
-          margin-bottom: 1.5rem;
-        }
-        .input-group label {
-          display: block;
-          font-size: 0.8rem;
-          font-weight: 600;
-          margin-bottom: 0.5rem;
-          color: #333;
-        }
-        .input-group input {
-          width: 100%;
-          padding: 0.8rem;
-          border: 1px solid #ddd;
-          border-radius: var(--radius-md);
-          font-size: 1rem;
-        }
-        .w-full { width: 100%; }
-        .btn-link {
-          background: none;
-          border: none;
-          color: var(--ambev-blue);
-          margin-top: 1rem;
-          font-size: 0.9rem;
-          cursor: pointer;
-          text-decoration: underline;
-        }
-      `}</style>
+                .auth-container { height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--ambev-gradient); }
+                .auth-card { width: 90%; max-width: 400px; text-align: center; }
+                .logo-text { font-family: var(--font-display); font-weight: 700; font-size: 3rem; color: var(--ambev-blue); margin-bottom: 0.5rem; letter-spacing: -2px; }
+                .subtitle { color: #666; margin-bottom: 2rem; font-size: 0.9rem; }
+                .input-group { text-align: left; margin-bottom: 1.5rem; }
+                .input-group label { display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.5rem; color: #333; }
+                .input-group input { width: 100%; padding: 0.8rem; border: 1px solid #ddd; border-radius: var(--radius-md); font-size: 1rem; }
+                .w-full { width: 100%; }
+                .btn-link { background: none; border: none; color: var(--ambev-blue); margin-top: 1rem; font-size: 0.9rem; cursor: pointer; text-decoration: underline; }
+            `}</style>
         </div>
     );
 }
@@ -460,24 +464,11 @@ function RegisterView({ onRegister, onSwitch }) {
                 <form onSubmit={(e) => { e.preventDefault(); onRegister(email, password); }}>
                     <div className="input-group">
                         <label>E-mail</label>
-                        <input
-                            type="email"
-                            value={email}
-                            onChange={e => setEmail(e.target.value)}
-                            required
-                            spellCheck="false"
-                            autoCorrect="off"
-                            autoCapitalize="none"
-                        />
+                        <input type="email" value={email} onChange={e => setEmail(e.target.value)} required />
                     </div>
                     <div className="input-group">
                         <label>Senha</label>
-                        <input
-                            type="password"
-                            value={password}
-                            onChange={e => setPassword(e.target.value)}
-                            required
-                        />
+                        <input type="password" value={password} onChange={e => setPassword(e.target.value)} required />
                     </div>
                     <button type="submit" className="btn-primary w-full">Cadastrar</button>
                 </form>
@@ -487,16 +478,82 @@ function RegisterView({ onRegister, onSwitch }) {
     );
 }
 
+// --- Log Modal Component ---
+function LogModal({ dispatch, onClose }) {
+    const [logs, setLogs] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchLogs = async () => {
+            try {
+                const res = await fetch(`/api/dispatch/${dispatch.userId}/${dispatch.id}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    setLogs(data.logs || []);
+                }
+            } catch (err) {
+                console.error('Error fetching logs:', err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchLogs();
+    }, [dispatch]);
+
+    return (
+        <div className="modal-overlay">
+            <div className="modal-content card ambev-flag" style={{ maxWidth: '800px', width: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+                <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                    <h3>Logs do Disparo #{dispatch.id}</h3>
+                    <button className="btn-icon" onClick={onClose}><X size={20} /></button>
+                </header>
+                <div style={{ overflowY: 'auto', flex: 1 }}>
+                    {loading ? <p>Carregando...</p> : (
+                        <table className="preview-table">
+                            <thead>
+                                <tr>
+                                    <th>Telefone</th>
+                                    <th>Status</th>
+                                    <th>Mensagem</th>
+                                    <th>Data</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {logs.map(log => (
+                                    <tr key={log.id}>
+                                        <td>{log.phone}</td>
+                                        <td><span className={`status-badge ${log.status}`}>{log.status}</span></td>
+                                        <td style={{ fontSize: '0.8rem' }}>{log.message || '-'}</td>
+                                        <td style={{ whiteSpace: 'nowrap' }}>{new Date(log.createdAt).toLocaleString()}</td>
+                                    </tr>
+                                ))}
+                                {logs.length === 0 && <tr><td colSpan="4" style={{ textAlign: 'center' }}>Nenhum log encontrado.</td></tr>}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            </div>
+            <style>{`
+                .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100000; }
+                .modal-content { overflow: hidden; padding: 2rem; position: relative; }
+                .btn-icon { background: none; border: none; cursor: pointer; color: #666; }
+            `}</style>
+        </div>
+    );
+}
+
+// --- Dashboard ---
 function Dashboard({
     user,
     onLogout,
     config,
     setConfig,
-    history,
-    setHistory,
+    dispatches,
+    setDispatches,
+    activeDispatch,
+    setActiveDispatch,
     receivedMessages,
-    setReceivedMessages,
-    saveDb,
+    fetchDispatches,
     campaignData,
     setCampaignData,
     headers,
@@ -509,72 +566,35 @@ function Dashboard({
     setTemplatePreview,
     dates,
     setDates,
-    sendingStatus,
-    setSendingStatus,
     activeTab,
     setActiveTab,
     activeContact,
     setActiveContact,
-    progress,
-    setProgress,
-    logs,
-    setLogs,
-    errors,
-    setErrors,
     showToken,
-    setShowToken
+    setShowToken,
+    addToast
 }) {
-    // No longer initialized from localStorage, received as props
-    // const [config, setConfig] = useState(() => { ... });
-    // const [campaignData, setCampaignData] = useState(null);
-    // const [headers, setHeaders] = useState([]);
-    // const [mapping, setMapping] = useState({});
-    // const [templateName, setTemplateName] = useState('');
-    // const [templatePreview, setTemplatePreview] = useState(null);
-    // const [dates, setDates] = useState({ old: '', new: '' });
-    // const [sendingStatus, setSendingStatus] = useState('idle'); // idle, sending, paused, completed
-    // const [activeTab, setActiveTab] = useState('disparos'); // disparos, historico, recebidas, ajustes
-    // const [receivedMessages, setReceivedMessages] = useState(() => { ... });
-    // const [activeContact, setActiveContact] = useState(null);
-    // const [history, setHistory] = useState(() => { ... });
-    // const [progress, setProgress] = useState({ current: 0, total: 0 });
-    // const [logs, setLogs] = useState([]);
-    // const [errors, setErrors] = useState([]);
-
-    // const [showToken, setShowToken] = useState(false); // Now passed as prop
     const [isEditing, setIsEditing] = useState(false);
     const [tempConfig, setTempConfig] = useState(config);
-
-    // These useEffects are now handled in App.js and passed down
-    // useEffect(() => {
-    //     localStorage.setItem('ambev_received_messages', JSON.stringify(receivedMessages));
-    // }, [receivedMessages]);
-
-    // useEffect(() => {
-    //     localStorage.setItem('ambev_history', JSON.stringify(history));
-    // }, [history]);
-
-    // Auto-save removed to allow explicit 'Save' in Settings
+    const [selectedLogDispatch, setSelectedLogDispatch] = useState(null);
 
     const handleFileUpload = (e) => {
         const file = e.target.files[0];
         if (!file) return;
-
-        const reader = new FileReader();
         const extension = file.name.split('.').pop().toLowerCase();
-
         if (extension === 'xlsx' || extension === 'xls') {
+            const reader = new FileReader();
             reader.onload = (evt) => {
                 const bstr = evt.target.result;
                 const wb = XLSX.read(bstr, { type: 'binary' });
-                const wsname = wb.SheetNames[0];
-                const ws = wb.Sheets[wsname];
+                const ws = wb.Sheets[wb.SheetNames[0]];
                 const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
                 if (data.length > 0) {
                     setHeaders(data[0]);
                     setCampaignData(data.slice(1).map(row => {
                         const obj = {};
                         data[0].forEach((header, i) => obj[header] = row[i]);
+                        obj._raw = row;
                         return obj;
                     }));
                 }
@@ -582,10 +602,7 @@ function Dashboard({
             reader.readAsBinaryString(file);
         } else {
             Papa.parse(file, {
-                header: true,
-                dynamicTyping: true,
-                skipEmptyLines: true,
-                complete: (results) => {
+                header: true, skipEmptyLines: true, complete: (results) => {
                     setHeaders(results.meta.fields);
                     setCampaignData(results.data);
                 }
@@ -593,37 +610,17 @@ function Dashboard({
         }
     };
 
-    const getGreeting = () => {
-        const hour = new Date().getHours();
-        if (hour < 12) return "Bom dia";
-        if (hour < 18) return "Boa tarde";
-        return "Boa noite";
-    };
-
     const getDateLogic = () => {
         const today = new Date();
         const tomorrow = new Date(today);
         tomorrow.setDate(today.getDate() + 1);
-
-        const format = (d) => {
-            const day = String(d.getDate()).padStart(2, '0');
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            return `${day}/${month}`;
-        };
-
+        const format = (d) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
         const todayStr = format(today);
         const tomorrowStr = format(tomorrow);
-
         let oldDisplay = dates.old ? `no dia ${dates.old}` : 'hoje';
         let newDisplay = dates.new ? `no dia ${dates.new}` : 'amanhã';
-
         if (dates.old === todayStr) oldDisplay = 'hoje';
         if (dates.new === tomorrowStr) newDisplay = 'amanhã';
-
-        // Se as datas forem vazias (ex: usuário esqueceu), assume hoje/amanhã como padrão amigável
-        if (!dates.old) oldDisplay = 'hoje';
-        if (!dates.new) newDisplay = 'amanhã';
-
         return { oldDisplay, newDisplay };
     };
 
@@ -631,10 +628,8 @@ function Dashboard({
         if (!campaignData || campaignData.length === 0) return null;
         const item = campaignData[0];
         const clientName = item[mapping['fantasy_name']] || '[NOME FANTASIA]';
-        const clientCode = item[mapping['client_code']] || '[CÓDIGO]';
         const orderNum = item[mapping['order_number']] || '[PEDIDO]';
         const { oldDisplay, newDisplay } = getDateLogic();
-
         return (
             <div className="template-box">
                 <p>Olá, <strong>{clientName}</strong>.</p>
@@ -645,113 +640,82 @@ function Dashboard({
         );
     };
 
-    // --- POLL SERVER STATUS ---
-    useEffect(() => {
-        let interval;
-        const checkStatus = async () => {
-            try {
-                const res = await fetch('/api/status');
-                const data = await res.json();
+    const startDispatch = async () => {
+        if (!config.token || !config.phoneId) return addToast('Configure as credenciais primeiro.', 'error');
+        if (!templateName) return addToast('Informe o nome do template.', 'error');
+        if (!campaignData) return addToast('Carregue uma base primeiro.', 'error');
 
-                setSendingStatus(data.status);
-                setProgress(data.progress);
-                if (data.logs.length > 0) setLogs(data.logs); // Sync logs
-                if (data.errors.length > 0) setErrors(data.errors);
-            } catch (e) {
-                console.error("Polling error", e);
-            }
-        };
-
-        if (sendingStatus === 'sending' || sendingStatus === 'paused') {
-            interval = setInterval(checkStatus, 2000);
-        } else {
-            // Check once to see if job persisted after refresh
-            checkStatus();
-        }
-
-        return () => clearInterval(interval);
-    }, [sendingStatus]);
-
-    const startSending = async () => {
-        if (!config.token || !config.phoneId) {
-            addToast('Configure as credenciais do Meta na aba Ajustes primeiro.', 'error');
-            return;
-        }
-        if (!templateName) {
-            addToast('Por favor, informe o Nome do Modelo (template) configurado na Meta.', 'error');
-            return;
-        }
-
-        if (sendingStatus === 'sending') {
-            // Already sending, do pause
-            await fetch('/api/control', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'pause' })
-            });
-            setSendingStatus('paused');
-            return;
-        }
-
-        if (sendingStatus === 'paused') {
-            // Resume
-            await fetch('/api/control', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'resume' })
-            });
-            setSendingStatus('sending');
-            return;
-        }
-
-        // START NEW CAMPAIGN
         const { oldDisplay, newDisplay } = getDateLogic();
-        setSendingStatus('sending');
+        const leads = campaignData.map(row => ({
+            'Nome fantasia': row[mapping['fantasy_name']] || row['Nome fantasia'],
+            'Nº do Pedido': row[mapping['order_number']] || row['Nº do Pedido'],
+            'Tel. Promax': row[mapping['phone']] || row['Tel. Promax'],
+            ...row
+        }));
 
         try {
-            const res = await fetch('/api/start-campaign', {
+            const res = await fetch(`/api/dispatch/${user.id}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    data: campaignData,
-                    config,
-                    templateName,
-                    dates: { old: oldDisplay, new: newDisplay }
-                })
+                body: JSON.stringify({ templateName, dateOld: oldDisplay, dateNew: newDisplay, leads })
             });
-
-            if (!res.ok) {
-                const err = await res.json();
-                addToast('Erro ao iniciar campanha: ' + err.error, 'error');
-                setSendingStatus('idle');
+            const data = await res.json();
+            if (res.ok && data.success) {
+                addToast('Disparo iniciado!', 'success');
+                setActiveDispatch({ id: data.dispatchId, status: 'running', currentIndex: 0, totalLeads: leads.length, successCount: 0, errorCount: 0 });
+                fetchDispatches();
+            } else {
+                addToast(data.error || 'Erro ao iniciar.', 'error');
             }
-        } catch (e) {
-            addToast('Erro de conexão com o servidor.', 'error');
-            setSendingStatus('idle');
-        }
+        } catch (err) { addToast('Erro de conexão.', 'error'); }
     };
 
+    const controlDispatch = async (action, dispatchId = null) => {
+        const id = dispatchId || activeDispatch?.id;
+        if (!id) return;
+        try {
+            const res = await fetch(`/api/dispatch/${id}/control`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action })
+            });
+            if (res.ok) {
+                addToast(`Ação ${action} realizada.`, 'info');
+                fetchDispatches();
+            } else {
+                const data = await res.json();
+                addToast(data.error || 'Erro ao controlar.', 'error');
+            }
+        } catch (err) { addToast('Erro de conexão.', 'error'); }
+    };
 
-    const retryErrors = async () => {
-        if (errors.length === 0) return;
+    const retryFailed = async (dispatchId) => {
+        try {
+            const res = await fetch(`/api/dispatch/${dispatchId}/retry`, { method: 'POST' });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                addToast(data.message, 'success');
+                fetchDispatches();
+                setActiveTab('disparos');
+            } else {
+                addToast(data.error || 'Erro ao reintentar.', 'error');
+            }
+        } catch (err) { addToast('Erro de conexão.', 'error'); }
+    };
 
-        const failedPhones = errors.map(err => err.split(': ')[0].replace('[ERRO] ', '').replace('[FALHA] ', ''));
-        const retryData = campaignData.filter(item => {
-            let phone = String(item[mapping['phone']] || '').replace(/\D/g, '');
-            if (phone && !phone.startsWith('55')) phone = '55' + phone;
-            return failedPhones.includes(phone);
-        });
-
-        if (retryData.length === 0) {
-            alert('Não foi possível mapear os erros de volta para a base.');
-            return;
-        }
-
-        setCampaignData(retryData);
-        setErrors([]);
-        setProgress({ current: 0, total: retryData.length });
-        setSendingStatus('idle');
-        alert(`Preparado para reenviar para ${retryData.length} registros com erro.`);
+    const saveConfig = async () => {
+        try {
+            const res = await fetch(`/api/config/${user.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...tempConfig, templateName, mapping })
+            });
+            if (res.ok) {
+                setConfig(tempConfig);
+                setIsEditing(false);
+                addToast('Configurações salvas!', 'success');
+            } else { addToast('Erro ao salvar.', 'error'); }
+        } catch (err) { addToast('Erro ao salvar.', 'error'); }
     };
 
     return (
@@ -762,428 +726,309 @@ function Dashboard({
                     <span>ambev</span>
                 </div>
                 <nav>
-                    <button
-                        className={`nav-item ${activeTab === 'disparos' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('disparos')}
-                    >
-                        <Send size={20} /> Disparos
-                    </button>
-                    <button
-                        className={`nav-item ${activeTab === 'historico' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('historico')}
-                    >
-                        <History size={20} /> Histórico
-                    </button>
-                    <button
-                        className={`nav-item ${activeTab === 'recebidas' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('recebidas')}
-                    >
-                        <AlertCircle size={20} /> Recebidas
-                    </button>
-                    <button
-                        className={`nav-item ${activeTab === 'ajustes' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('ajustes')}
-                    >
-                        <Settings size={20} /> Ajustes
-                    </button>
+                    <button className={`nav-item ${activeTab === 'disparos' ? 'active' : ''}`} onClick={() => setActiveTab('disparos')}><Send size={20} /> Disparos</button>
+                    <button className={`nav-item ${activeTab === 'historico' ? 'active' : ''}`} onClick={() => setActiveTab('historico')}><History size={20} /> Histórico</button>
+                    <button className={`nav-item ${activeTab === 'recebidas' ? 'active' : ''}`} onClick={() => setActiveTab('recebidas')}><AlertCircle size={20} /> Recebidas</button>
+                    <button className={`nav-item ${activeTab === 'ajustes' ? 'active' : ''}`} onClick={() => setActiveTab('ajustes')}><Settings size={20} /> Ajustes</button>
                 </nav>
                 <div className="user-profile">
-                    <div className="user-info">
-                        <span className="user-email">{user.email}</span>
-                    </div>
+                    <div className="user-info"><span className="user-email">{user.email}</span></div>
                     <button className="logout-btn" onClick={onLogout}><LogOut size={18} /></button>
                 </div>
             </aside>
 
             <main className="content">
                 <header className="content-header">
-                    <h1>{activeTab === 'disparos' ? 'Automação de Notificações' : activeTab === 'historico' ? 'Histórico de Disparos' : 'Configurações'}</h1>
-                    {activeTab === 'disparos' && <div className="badge-live">Live</div>}
+                    <h1>{activeTab === 'disparos' ? 'Automação de Notificações' : activeTab === 'historico' ? 'Histórico' : activeTab === 'recebidas' ? 'Mensagens Recebidas' : 'Configurações'}</h1>
+                    {activeTab === 'disparos' && activeDispatch?.status === 'running' && <div className="badge-live">Live</div>}
                 </header>
 
                 {activeTab === 'disparos' && (
                     <section className="dashboard-grid">
-                        {/* Upload de Base */}
-                        {!campaignData ? (
-                            <div className="card ambev-flag upload-card" style={{ gridColumn: 'span 2' }}>
-                                <h3><Upload size={18} /> Selecione sua Base de Dados</h3>
-                                <p className="card-desc">Suporta arquivos .xlsx, .xls ou .csv</p>
-                                <div className="dropzone" onClick={() => document.getElementById('fileInput').click()}>
-                                    <input type="file" id="fileInput" className="hidden" accept=".xlsx,.xls,.csv" onChange={handleFileUpload} />
-                                    <div className="dropzone-label">
-                                        <Upload size={48} strokeWidth={1} />
-                                        <span>Clique aqui ou arraste o arquivo</span>
+                        {activeDispatch && (activeDispatch.status === 'running' || activeDispatch.status === 'paused' || activeDispatch.status === 'stopped') ? (
+                            <div className="card ambev-flag progress-container" style={{ gridColumn: 'span 2' }}>
+                                <div className="progress-header">
+                                    <span>#{activeDispatch.id} - Progresso: {activeDispatch.currentIndex} / {activeDispatch.totalLeads}</span>
+                                    <div className="status-group">
+                                        {activeDispatch.errorCount > 0 && <span className="error-badge">{activeDispatch.errorCount} erros</span>}
+                                        <span className={`status-badge ${activeDispatch.status}`}>{activeDispatch.status}</span>
                                     </div>
                                 </div>
+                                <div className="progress-bar-bg">
+                                    <div className="progress-bar-fill" style={{ width: `${(activeDispatch.currentIndex / activeDispatch.totalLeads) * 100 || 0}%` }}></div>
+                                </div>
+                                <div className="progress-controls">
+                                    {activeDispatch.status === 'running' ? (
+                                        <button className="btn-pause" onClick={() => controlDispatch('pause')}><Pause size={18} /> Pausar</button>
+                                    ) : (
+                                        <button className="btn-resume" onClick={() => controlDispatch('resume')}><Play size={18} /> Continuar</button>
+                                    )}
+                                    <button className="btn-secondary" onClick={() => controlDispatch('stop')}><RotateCcw size={18} /> Parar tudo</button>
+                                    <button className="btn-secondary" onClick={() => setSelectedLogDispatch(activeDispatch)}><List size={18} /> Ver Logs</button>
+                                </div>
+                                {activeDispatch.lastLog && (
+                                    <div className="log-container">
+                                        <label>Último:</label>
+                                        <div className={`log-entry ${activeDispatch.lastLog.status === 'error' ? 'error' : ''}`}>
+                                            {activeDispatch.lastLog.phone}: {activeDispatch.lastLog.status === 'success' ? '✓ OK' : `✗ ${activeDispatch.lastLog.message}`}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         ) : (
-                            <div className="card ambev-flag upload-success" style={{ gridColumn: 'span 2' }}>
-                                <CheckCircle2 size={48} color="var(--ambev-green)" />
-                                <h3>Base carregada com sucesso!</h3>
-                                <p>{campaignData.length} registros encontrados.</p>
-                                <button className="btn-link" onClick={() => setCampaignData(null)}>Trocar arquivo</button>
-                            </div>
-                        )}
-
-                        {campaignData && (
-                            <div className="campaign-container" style={{ gridColumn: 'span 2', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
-                                <div className="card ambev-flag mapping-card">
-                                    <h3>Mapeamento de Colunas</h3>
-                                    <div className="mapping-grid">
-                                        {REQUIRED_COLUMNS.map(col => (
-                                            <div key={col.id} className="input-group">
-                                                <label>{col.label}</label>
-                                                <select
-                                                    value={mapping[col.id] || ''}
-                                                    onChange={e => setMapping({ ...mapping, [col.id]: e.target.value })}
-                                                >
-                                                    <option value="">Selecione a coluna...</option>
-                                                    {headers.map(h => <option key={h} value={h}>{h}</option>)}
-                                                </select>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <div className="card ambev-flag template-card">
-                                    <h3>Configuração do Template</h3>
-                                    <div className="input-group">
-                                        <label>Nome do Modelo no Meta</label>
-                                        <div className="input-with-btn">
-                                            <input
-                                                type="text"
-                                                placeholder="ex: alteracao_entrega_ambev"
-                                                value={templateName}
-                                                onChange={e => setTemplateName(e.target.value)}
-                                            />
-                                            <button className="btn-secondary" onClick={() => setTemplatePreview(true)}>Validar</button>
+                            <>
+                                {!campaignData ? (
+                                    <div className="card ambev-flag upload-card" style={{ gridColumn: 'span 2' }}>
+                                        <h3><Upload size={18} /> Base de Dados</h3>
+                                        <div className="dropzone" onClick={() => document.getElementById('fileInput').click()}>
+                                            <input type="file" id="fileInput" className="hidden" accept=".xlsx,.xls,.csv" onChange={handleFileUpload} />
+                                            <div className="dropzone-label"><Upload size={48} strokeWidth={1} /><span>Clique ou arraste o arquivo</span></div>
                                         </div>
                                     </div>
-
-                                    <div className="input-row mt-4">
-                                        <div className="input-group">
-                                            <label>Data Antiga</label>
-                                            <input
-                                                type="text"
-                                                placeholder="12/01"
-                                                value={dates.old}
-                                                onChange={e => setDates({ ...dates, old: e.target.value })}
-                                                spellCheck="false"
-                                                autoCorrect="off"
-                                                autoCapitalize="none"
-                                            />
+                                ) : (
+                                    <>
+                                        <div className="card ambev-flag upload-success" style={{ gridColumn: 'span 2' }}>
+                                            <CheckCircle2 size={48} color="var(--ambev-green)" />
+                                            <h3>Base carregada: {campaignData.length} leads</h3>
+                                            <button className="btn-link" onClick={() => setCampaignData(null)}>Trocar base</button>
                                         </div>
-                                        <div className="input-group">
-                                            <label>Data Nova</label>
-                                            <input
-                                                type="text"
-                                                placeholder="13/01"
-                                                value={dates.new}
-                                                onChange={e => setDates({ ...dates, new: e.target.value })}
-                                                spellCheck="false"
-                                                autoCorrect="off"
-                                                autoCapitalize="none"
-                                            />
-                                        </div>
-                                    </div>
-
-                                    {templatePreview && (
-                                        <div className="preview-container">
-                                            <label>Preview da Mensagem:</label>
-                                            {renderTemplatePreview()}
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="card ambev-flag table-card" style={{ gridColumn: 'span 2' }}>
-                                    <h3>Preview da Base</h3>
-                                    <div style={{ overflowX: 'auto' }}>
-                                        <table className="preview-table">
-                                            <thead>
-                                                <tr>{headers.map(h => <th key={h}>{h}</th>)}</tr>
-                                            </thead>
-                                            <tbody>
-                                                {campaignData.slice(0, 5).map((row, i) => (
-                                                    <tr key={i}>{headers.map(h => <td key={h}>{row[h]}</td>)}</tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-
-                                <div className="dispatch-actions">
-                                    {sendingStatus === 'idle' && (
-                                        <button className="btn-primary btn-lg" onClick={startSending}>
-                                            <Send size={24} /> Iniciar Disparo em Massa
-                                        </button>
-                                    )}
-
-                                    {sendingStatus !== 'idle' && (
-                                        <div className="progress-container card ambev-flag">
-                                            <div className="progress-header">
-                                                <span>Progresso: {progress.current} / {progress.total}</span>
-                                                <div className="status-group">
-                                                    {errors.length > 0 && <span className="error-badge">{errors.length} erros</span>}
-                                                    <span className="status-badge">{sendingStatus}</span>
-                                                </div>
-                                            </div>
-                                            <div className="progress-bar-bg">
-                                                <div className="progress-bar-fill" style={{ width: `${(progress.current / progress.total) * 100}%` }}></div>
-                                            </div>
-                                            <div className="progress-controls">
-                                                {sendingStatus === 'sending' && <button className="btn-pause" onClick={() => setSendingStatus('paused')}>Pausar Disparo</button>}
-                                                {sendingStatus === 'paused' && <button className="btn-resume" onClick={startSending}>Continuar Disparo</button>}
-                                                {sendingStatus === 'completed' && <button className="btn-secondary" onClick={() => { setSendingStatus('idle'); setCampaignData(null); }}>Novo Disparo</button>}
-                                                {errors.length > 0 && sendingStatus === 'completed' && <button className="btn-retry" onClick={retryErrors}>Reenviar Falhas ({errors.length})</button>}
-                                            </div>
-
-                                            <div className="log-container">
-                                                <label>Log de Execução:</label>
-                                                <div className="log-box">
-                                                    {logs.map((log, i) => (
-                                                        <div key={i} className={`log-entry ${log.includes('[ERRO]') || log.includes('[FALHA]') ? 'error' : ''}`}>
-                                                            {log}
-                                                        </div>
+                                        <div className="card ambev-flag" style={{ gridColumn: 'span 2', maxHeight: '400px', overflow: 'auto', padding: '1rem' }}>
+                                            <h3>📊 Preview dos Dados</h3>
+                                            <table className="preview-table">
+                                                <thead>
+                                                    <tr>{headers.map(h => <th key={h}>{h}</th>)}</tr>
+                                                </thead>
+                                                <tbody>
+                                                    {campaignData.slice(0, 10).map((row, i) => (
+                                                        <tr key={i}>
+                                                            {headers.map(h => <td key={h}>{row[h]}</td>)}
+                                                        </tr>
                                                     ))}
-                                                    {logs.length === 0 && <div className="log-empty">Nenhuma atividade registrada...</div>}
-                                                </div>
+                                                </tbody>
+                                            </table>
+                                            {campaignData.length > 10 && <p style={{ fontSize: '0.8rem', color: '#666', marginTop: '10px' }}>Exibindo os primeiros 10 leads de {campaignData.length}.</p>}
+                                        </div>
+                                    </>
+                                )}
+                                {campaignData && (
+                                    <>
+                                        <div className="card ambev-flag mapping-card">
+                                            <h3>Mapeamento</h3>
+                                            <div className="mapping-grid">
+                                                {REQUIRED_COLUMNS.map(col => (
+                                                    <div key={col.id} className="input-group">
+                                                        <label>{col.label}</label>
+                                                        <select value={mapping[col.id] || ''} onChange={e => setMapping({ ...mapping, [col.id]: e.target.value })}>
+                                                            <option value="">Coluna...</option>
+                                                            {headers.map(h => <option key={h} value={h}>{h}</option>)}
+                                                        </select>
+                                                    </div>
+                                                ))}
                                             </div>
                                         </div>
-                                    )}
-                                </div>
-                            </div>
+                                        <div className="card ambev-flag template-card">
+                                            <h3>Datas e Template</h3>
+                                            <div className="input-group"><label>Template Meta</label><input type="text" value={templateName} onChange={e => setTemplateName(e.target.value)} /></div>
+                                            <div className="input-grid mt-4">
+                                                <div className="input-group"><label>Antiga</label><input type="text" placeholder="12/01" value={dates.old} onChange={e => setDates({ ...dates, old: e.target.value })} /></div>
+                                                <div className="input-group"><label>Nova</label><input type="text" placeholder="13/01" value={dates.new} onChange={e => setDates({ ...dates, new: e.target.value })} /></div>
+                                            </div>
+                                            <button className="btn-secondary mt-2" onClick={() => setTemplatePreview(true)}>Validar Template</button>
+                                            {templatePreview && renderTemplatePreview()}
+                                        </div>
+                                        <div className="dispatch-actions" style={{ gridColumn: 'span 2' }}>
+                                            <button className="btn-primary btn-lg" onClick={startDispatch}><Send size={24} /> Iniciar Disparo</button>
+                                        </div>
+                                    </>
+                                )}
+                            </>
                         )}
                     </section>
                 )}
 
                 {activeTab === 'recebidas' && (
-                    <div className="received-container">
-                        <aside className="contacts-sidebar card ambev-flag">
-                            <h3>Conversas</h3>
-                            <div className="contacts-list">
-                                {Array.from(new Set(receivedMessages.map(m => m.from))).map(phone => (
-                                    <button
-                                        key={phone}
-                                        className={`contact-item ${activeContact === phone ? 'active' : ''}`}
-                                        onClick={() => setActiveContact(phone)}
-                                    >
-                                        <div className="contact-info">
-                                            <span className="contact-phone">{phone}</span>
-                                            <span className="last-msg">
-                                                {receivedMessages.filter(m => m.from === phone).slice(-1)[0]?.text}
-                                            </span>
+                    <div className="received-container" style={{ display: 'flex', gap: '20px', height: 'calc(100vh - 160px)' }}>
+                        <div className="card ambev-flag" style={{ width: '300px', flexShrink: 0, display: 'flex', flexDirection: 'column', padding: '1rem' }}>
+                            <h3>Contatos</h3>
+                            <div className="contact-list" style={{ flex: 1, overflowY: 'auto', marginTop: '1rem' }}>
+                                {Array.from(new Set(receivedMessages.map(m => m.contactPhone))).map(phone => {
+                                    const lastMsg = receivedMessages.find(m => m.contactPhone === phone);
+                                    const isSelected = activeContact === phone;
+                                    return (
+                                        <div
+                                            key={phone}
+                                            className={`contact-item ${isSelected ? 'active' : ''}`}
+                                            onClick={() => setActiveContact(phone)}
+                                            style={{
+                                                padding: '12px',
+                                                borderRadius: '8px',
+                                                cursor: 'pointer',
+                                                marginBottom: '8px',
+                                                border: isSelected ? '2px solid var(--ambev-blue)' : '1px solid #eee',
+                                                backgroundColor: isSelected ? '#f0f4ff' : 'white'
+                                            }}
+                                        >
+                                            <div style={{ fontWeight: 600 }}>{lastMsg.contactName || phone}</div>
+                                            <div style={{ fontSize: '0.8rem', color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                {lastMsg.messageBody}
+                                            </div>
                                         </div>
-                                    </button>
-                                ))}
-                                {receivedMessages.length === 0 && <p className="empty-text">Nenhuma mensagem recebida ainda.</p>}
+                                    );
+                                })}
+                                {receivedMessages.length === 0 && <p style={{ textAlign: 'center', color: '#999', marginTop: '2rem' }}>Nenhuma mensagem.</p>}
                             </div>
-                        </aside>
+                        </div>
 
-                        <main className={`chat-area card ambev-flag ${activeContact ? 'active' : ''}`}>
+                        <div className="card ambev-flag chat-view" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0' }}>
                             {activeContact ? (
                                 <>
-                                    <header className="chat-header">
-                                        <h3>{activeContact}</h3>
-                                        <div className="header-actions">
-                                            <button className="btn-secondary" onClick={() => window.open(`tel:${activeContact}`)}>Ligar</button>
-                                            <button className="btn-mobile-back" onClick={() => setActiveContact(null)}>Voltar</button>
-                                        </div>
+                                    <header style={{ padding: '1rem', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                        <div style={{ fontWeight: 700 }}>{receivedMessages.find(m => m.contactPhone === activeContact)?.contactName || activeContact}</div>
+                                        <div style={{ fontSize: '0.8rem', color: '#666' }}>{activeContact}</div>
                                     </header>
-                                    <div className="messages-log">
-                                        {receivedMessages.filter(m => m.from === activeContact).map((m, i) => (
-                                            <div key={i} className="msg-bubble received">
-                                                <p>{m.text}</p>
-                                                <span className="msg-time">{m.timestamp}</span>
+                                    <div className="chat-messages" style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column-reverse' }}>
+                                        {receivedMessages.filter(m => m.contactPhone === activeContact).map(msg => (
+                                            <div key={msg.id} style={{
+                                                alignSelf: msg.isFromMe ? 'flex-end' : 'flex-start',
+                                                backgroundColor: msg.isFromMe ? 'var(--ambev-blue)' : '#f0f2f5',
+                                                color: msg.isFromMe ? 'white' : 'black',
+                                                padding: '10px 14px',
+                                                borderRadius: '12px',
+                                                maxWidth: '80%',
+                                                marginBottom: '10px',
+                                                position: 'relative',
+                                                fontSize: '0.9rem'
+                                            }}>
+                                                {msg.messageBody}
+                                                <div style={{ fontSize: '0.65rem', opacity: 0.7, marginTop: '4px', textAlign: 'right' }}>
+                                                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
+                                    <form
+                                        style={{ padding: '1rem', borderTop: '1px solid #eee', display: 'flex', gap: '10px' }}
+                                        onSubmit={async (e) => {
+                                            e.preventDefault();
+                                            const text = e.target.reply.value;
+                                            if (!text) return;
+                                            try {
+                                                const res = await fetch('/api/send-message', {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ userId: user.id, phone: activeContact, text })
+                                                });
+                                                if (res.ok) {
+                                                    e.target.reply.value = '';
+                                                    addToast('Mensagem enviada!', 'success');
+                                                    // receivedMessages will update via WS or the log inside API
+                                                } else {
+                                                    addToast('Erro ao enviar resposta.', 'error');
+                                                }
+                                            } catch (err) { addToast('Erro de conexão.', 'error'); }
+                                        }}
+                                    >
+                                        <input name="reply" type="text" placeholder="Digite uma resposta..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid #ddd' }} />
+                                        <button type="submit" className="btn-icon" style={{ backgroundColor: 'var(--ambev-blue)', color: 'white', borderRadius: '50%', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            <Send size={20} />
+                                        </button>
+                                    </form>
                                 </>
                             ) : (
-                                <div className="chat-placeholder">
-                                    <AlertCircle size={48} opacity={0.2} />
-                                    <p>Selecione uma conversa para ver o retorno do cliente.</p>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999', flexDirection: 'column' }}>
+                                    <AlertCircle size={48} strokeWidth={1} style={{ marginBottom: '1rem' }} />
+                                    Selecione um contato para ver as mensagens
                                 </div>
                             )}
-                        </main>
+                        </div>
                     </div>
                 )}
 
                 {activeTab === 'historico' && (
-                    <div className="card ambev-flag" style={{ width: '100%', boxSizing: 'border-box' }}>
-                        <h3><History size={18} /> Campanhas Recentes</h3>
-                        {history.length === 0 ? (
-                            <p style={{ color: '#666' }}>Nenhuma campanha realizada ainda.</p>
-                        ) : (
-                            <div style={{ overflowX: 'auto' }}>
-                                <table className="preview-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Data/Hora</th>
-                                            <th>Template</th>
-                                            <th>Total</th>
-                                            <th>Sucesso</th>
-                                            <th>Erros</th>
+                    <div className="card ambev-flag" style={{ width: '100%' }}>
+                        <h3>Camppanhas Recentes</h3>
+                        <div style={{ overflowX: 'auto' }}>
+                            <table className="preview-table">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Data</th>
+                                        <th>Total</th>
+                                        <th>Sucesso</th>
+                                        <th>Erros</th>
+                                        <th>Status</th>
+                                        <th>Ação</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {dispatches.map(d => (
+                                        <tr key={d.id}>
+                                            <td>#{d.id}</td>
+                                            <td style={{ fontSize: '0.8rem' }}>{new Date(d.createdAt).toLocaleString()}</td>
+                                            <td>{d.totalLeads}</td>
+                                            <td style={{ color: 'var(--ambev-green)' }}>{d.successCount}</td>
+                                            <td style={{ color: d.errorCount > 0 ? '#ff5555' : 'inherit' }}>{d.errorCount}</td>
+                                            <td><span className={`status-badge ${d.status}`}>{d.status}</span></td>
+                                            <td style={{ display: 'flex', gap: '8px' }}>
+                                                <button className="btn-icon" onClick={() => setSelectedLogDispatch(d)} title="Ver Logs"><List size={18} /></button>
+                                                {d.errorCount > 0 && d.status !== 'running' && (
+                                                    <button className="btn-icon" onClick={() => retryFailed(d.id)} title="Reintentar Erros" style={{ color: 'var(--ambev-blue)' }}><RotateCcw size={18} /></button>
+                                                )}
+                                            </td>
                                         </tr>
-                                    </thead>
-                                    <tbody>
-                                        {history.map(item => (
-                                            <tr key={item.id}>
-                                                <td>{item.date}</td>
-                                                <td><code>{item.template}</code></td>
-                                                <td>{item.total}</td>
-                                                <td style={{ color: 'var(--ambev-green)', fontWeight: 'bold' }}>{item.success}</td>
-                                                <td style={{ color: item.errors > 0 ? '#ff5555' : 'inherit' }}>{item.errors}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 )}
 
                 {activeTab === 'ajustes' && (
                     <div className="card ambev-flag">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h3><Settings size={18} /> Credenciais Meta API</h3>
-                            {!isEditing && (
-                                <button className="btn-secondary" onClick={() => { setTempConfig(config); setIsEditing(true); }}>
-                                    Editar
-                                </button>
-                            )}
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <h3>Credenciais</h3>
+                            <button className="btn-secondary" onClick={() => setIsEditing(!isEditing)}>{isEditing ? 'Cancelar' : 'Editar'}</button>
                         </div>
-
-                        <p className="card-desc">Configure as credenciais do seu aplicativo no Meta for Developers.</p>
-
-                        <div className="input-grid">
+                        <div className="input-grid mt-4">
                             <div className="input-group">
-                                <label>WHATSAPP_ACCESS_TOKEN</label>
+                                <label>Token</label>
                                 <div className="input-with-btn">
-                                    <input
-                                        type={showToken ? "text" : "password"}
-                                        value={isEditing ? tempConfig.token : config.token}
-                                        onChange={e => setTempConfig({ ...tempConfig, token: e.target.value })}
-                                        disabled={!isEditing}
-                                        placeholder="EAAB..."
-                                        spellCheck="false"
-                                        autoCorrect="off"
-                                        autoCapitalize="none"
-                                        style={{ opacity: isEditing ? 1 : 0.7 }}
-                                    />
-                                    <button
-                                        className="btn-secondary"
-                                        onClick={() => setShowToken(!showToken)}
-                                        title={showToken ? "Esconder" : "Mostrar"}
-                                    >
-                                        {showToken ? <EyeOff size={18} /> : <Eye size={18} />}
-                                    </button>
+                                    <input type={showToken ? "text" : "password"} value={isEditing ? tempConfig.token : config.token} onChange={e => setTempConfig({ ...tempConfig, token: e.target.value })} disabled={!isEditing} />
+                                    <button onClick={() => setShowToken(!showToken)}>{showToken ? <EyeOff size={18} /> : <Eye size={18} />}</button>
                                 </div>
                             </div>
-                            <div className="input-row" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-                                <div className="input-group" style={{ flex: '1 1 200px' }}>
-                                    <label>PHONE_NUMBER_ID</label>
-                                    <input
-                                        type="text"
-                                        value={isEditing ? tempConfig.phoneId : config.phoneId}
-                                        onChange={e => setTempConfig({ ...tempConfig, phoneId: e.target.value })}
-                                        disabled={!isEditing}
-                                        spellCheck="false"
-                                        autoCorrect="off"
-                                        autoCapitalize="none"
-                                        style={{ opacity: isEditing ? 1 : 0.7 }}
-                                    />
-                                </div>
-                                <div className="input-group" style={{ flex: '1 1 200px' }}>
-                                    <label>BUSINESS_ACCOUNT_ID</label>
-                                    <input
-                                        type="text"
-                                        value={isEditing ? tempConfig.wabaId : config.wabaId}
-                                        onChange={e => setTempConfig({ ...tempConfig, wabaId: e.target.value })}
-                                        disabled={!isEditing}
-                                        spellCheck="false"
-                                        autoCorrect="off"
-                                        autoCapitalize="none"
-                                        style={{ opacity: isEditing ? 1 : 0.7 }}
-                                    />
-                                </div>
+                            <div className="input-row">
+                                <div className="input-group"><label>Phone ID</label><input type="text" value={isEditing ? tempConfig.phoneId : config.phoneId} onChange={e => setTempConfig({ ...tempConfig, phoneId: e.target.value })} disabled={!isEditing} /></div>
+                                <div className="input-group"><label>WABA ID</label><input type="text" value={isEditing ? tempConfig.wabaId : config.wabaId} onChange={e => setTempConfig({ ...tempConfig, wabaId: e.target.value })} disabled={!isEditing} /></div>
                             </div>
-
-                            {isEditing && (
-                                <div className="mt-4" style={{ display: 'flex', gap: '1rem' }}>
-                                    <button
-                                        className="btn-secondary w-full"
-                                        onClick={() => { setIsEditing(false); }}
-                                        style={{ background: '#eee', color: '#333' }}
-                                    >
-                                        Cancelar
-                                    </button>
-                                    <button
-                                        className="btn-primary w-full"
-                                        onClick={async () => {
-                                            setConfig(tempConfig);
-                                            // SQLite Save Config
-                                            await fetch('/api/config', {
-                                                method: 'POST',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({
-                                                    ...tempConfig,
-                                                    email: user?.email,
-                                                    templateName,
-                                                    mapping
-                                                })
-                                            });
-                                            // await saveDb({ config: tempConfig }); // Legacy removed
-                                            setIsEditing(false);
-                                            addToast('Configurações salvas e sincronizadas!', 'success');
-                                        }}
-                                    >
-                                        Salvar Configurações
-                                    </button>
-                                </div>
-                            )}
-                            {!isEditing && (
-                                <div className="mt-4">
-                                    <p style={{ fontSize: '0.8rem', color: '#999', textAlign: 'center' }}>
-                                        As configurações atuais estão sincronizadas com o servidor.
-                                    </p>
-                                </div>
-                            )}
+                            {isEditing && <button className="btn-primary w-full mt-4" onClick={saveConfig}>Salvar</button>}
                         </div>
                     </div>
                 )}
             </main>
 
-            {/* Bottom Navigation for Mobile */}
-            <nav className="mobile-nav">
-                <button
-                    className={`mobile-nav-item ${activeTab === 'disparos' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('disparos')}
-                >
-                    <Send size={20} />
-                    <span>Disparos</span>
+            <div className="mobile-nav">
+                <button className={`mobile-nav-item ${activeTab === 'disparos' ? 'active' : ''}`} onClick={() => setActiveTab('disparos')}>
+                    <Send size={24} />
+                    <span>Início</span>
                 </button>
-                <button
-                    className={`mobile-nav-item ${activeTab === 'historico' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('historico')}
-                >
-                    <History size={20} />
-                    <span>Histórico</span>
-                </button>
-                <button
-                    className={`mobile-nav-item ${activeTab === 'recebidas' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('recebidas')}
-                >
-                    <AlertCircle size={20} />
+                <button className={`mobile-nav-item ${activeTab === 'recebidas' ? 'active' : ''}`} onClick={() => setActiveTab('recebidas')}>
+                    <AlertCircle size={24} />
                     <span>Recebidas</span>
                 </button>
-                <button
-                    className={`mobile-nav-item ${activeTab === 'ajustes' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('ajustes')}
-                >
-                    <Settings size={20} />
+                <button className={`mobile-nav-item ${activeTab === 'historico' ? 'active' : ''}`} onClick={() => setActiveTab('historico')}>
+                    <History size={24} />
+                    <span>Histórico</span>
+                </button>
+                <button className={`mobile-nav-item ${activeTab === 'ajustes' ? 'active' : ''}`} onClick={() => setActiveTab('ajustes')}>
+                    <Settings size={24} />
                     <span>Ajustes</span>
                 </button>
-            </nav>
+            </div>
+
+            {selectedLogDispatch && (
+                <LogModal dispatch={selectedLogDispatch} onClose={() => setSelectedLogDispatch(null)} />
+            )}
         </div>
     );
 }

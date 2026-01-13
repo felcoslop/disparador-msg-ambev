@@ -1,182 +1,298 @@
 import express from 'express';
 import cors from 'cors';
-import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getDB, initializeDB } from './database.js';
+import { createServer } from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
+import { PrismaClient } from '@prisma/client';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const WEBHOOK_VERIFY_TOKEN = 'ambev_webhook_token_2026'; // Should match meta dashboard
+const server = createServer(app);
+const wss = new WebSocketServer({ server });
+const prisma = new PrismaClient();
 
-// Initialize DB on start
-initializeDB().then(() => {
-    console.log('[DB] Database ready');
-}).catch(err => {
-    console.error('[DB ERROR] Failed to initialize:', err);
+const PORT = process.env.PORT || 3000;
+const WEBHOOK_VERIFY_TOKEN = 'ambev_webhook_token_2026';
+
+// --- WebSocket Client Management ---
+const clients = new Map(); // userId -> Set of WebSocket connections
+
+wss.on('connection', (ws, req) => {
+    console.log('[WS] New connection');
+
+    ws.on('message', (message) => {
+        try {
+            const data = JSON.parse(message.toString());
+            if (data.type === 'auth' && data.userId) {
+                // Associate this connection with a user
+                if (!clients.has(data.userId)) {
+                    clients.set(data.userId, new Set());
+                }
+                clients.get(data.userId).add(ws);
+                ws.userId = data.userId;
+                console.log(`[WS] Client authenticated for user ${data.userId}`);
+            }
+        } catch (e) {
+            console.error('[WS] Parse error:', e);
+        }
+    });
+
+    ws.on('close', () => {
+        if (ws.userId && clients.has(ws.userId)) {
+            clients.get(ws.userId).delete(ws);
+            if (clients.get(ws.userId).size === 0) {
+                clients.delete(ws.userId);
+            }
+        }
+        console.log('[WS] Client disconnected');
+    });
 });
 
-app.use(cors());
-app.use(express.json({ limit: '50mb' })); // Support large payloads (images/base64)
+// Broadcast to all connections of a specific user
+function broadcast(userId, event, data) {
+    if (clients.has(userId)) {
+        const message = JSON.stringify({ event, data });
+        clients.get(userId).forEach(ws => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(message);
+            }
+        });
+    }
+}
 
+// --- Middleware ---
+app.use(cors());
+app.use(express.json({ limit: '50mb' }));
+
+// --- Health Check ---
 app.get('/health', (req, res) => res.send('OK'));
 
-// Aggregate GET for initial load
-app.get('/api/db', async (req, res) => {
-    try {
-        const email = req.query.email; // Frontend should pass ?email=...
-        const db = await getDB();
-        const users = await db.all('SELECT * FROM users');
-        const history = await db.all('SELECT * FROM history ORDER BY id DESC');
-        const receivedMessages = await db.all('SELECT * FROM received_messages ORDER BY id DESC');
+// --- AUTH ROUTES ---
 
-        // Fetch config ONLY for the specific user if email provided
-        let userConfig = { token: '', phoneId: '', wabaId: '', templateName: '', mapping: {} };
-        if (email) {
-            const user = await db.get('SELECT id FROM users WHERE email = ?', email);
-            if (user) {
-                const conf = await db.get('SELECT * FROM user_config WHERE user_id = ?', user.id);
-                if (conf) {
-                    userConfig = {
-                        ...conf,
-                        mapping: conf.mapping ? JSON.parse(conf.mapping) : {}
-                    };
-                }
-            }
+// Register
+app.post('/api/register', async (req, res) => {
+    try {
+        const { email, name, password } = req.body;
+
+        const existing = await prisma.user.findUnique({ where: { email } });
+        if (existing) {
+            return res.status(400).json({ error: 'E-mail já cadastrado' });
+        }
+
+        const user = await prisma.user.create({
+            data: { email, name, password }
+        });
+
+        // Create empty config
+        await prisma.userConfig.create({
+            data: { userId: user.id }
+        });
+
+        res.json({ success: true, user: { id: user.id, email: user.email, name: user.name } });
+    } catch (err) {
+        console.error('[REGISTER ERROR]', err);
+        res.status(500).json({ error: 'Erro ao cadastrar usuário' });
+    }
+});
+
+// Login
+app.post('/api/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        const user = await prisma.user.findUnique({
+            where: { email },
+            include: { config: true }
+        });
+
+        if (!user || user.password !== password) {
+            return res.status(401).json({ error: 'E-mail ou senha incorretos' });
         }
 
         res.json({
-            users,
-            config: userConfig, // returns user-specific config
-            history,
-            receivedMessages
+            success: true,
+            user: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                config: user.config ? {
+                    token: user.config.token,
+                    phoneId: user.config.phoneId,
+                    wabaId: user.config.wabaId,
+                    templateName: user.config.templateName,
+                    mapping: JSON.parse(user.config.mapping || '{}')
+                } : null
+            }
         });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Failed to read database' });
+        console.error('[LOGIN ERROR]', err);
+        res.status(500).json({ error: 'Erro ao fazer login' });
     }
 });
 
-// Specific Sync Endpoints (Transactional)
-app.post('/api/register', async (req, res) => {
+// --- USER ROUTES ---
+
+// Get user with config
+app.get('/api/user/:userId', async (req, res) => {
     try {
-        const { email, password } = req.body;
-        const db = await getDB();
-        await db.run('INSERT INTO users (email, password) VALUES (?, ?)', email, password);
-        res.json({ success: true });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Failed to register user' });
-    }
-});
+        const userId = parseInt(req.params.userId);
 
-app.post('/api/config', async (req, res) => {
-    try {
-        const { email, token, phoneId, wabaId, templateName, mapping } = req.body;
-        console.log(`[API] Saving config for ${email}:`, { token: '***', phoneId, wabaId, templateName, mapping });
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            include: { config: true }
+        });
 
-        const db = await getDB();
-        const user = await db.get('SELECT id FROM users WHERE email = ?', email);
-
-        if (!user) return res.status(404).json({ error: 'User not found' });
-
-        await db.run(`INSERT OR REPLACE INTO user_config (user_id, token, phoneId, wabaId, templateName, mapping) 
-                      VALUES (?, ?, ?, ?, ?, ?)`,
-            user.id,
-            token || '',
-            phoneId || '',
-            wabaId || '',
-            templateName || '',
-            JSON.stringify(mapping || {}));
-
-        res.json({ success: true });
-    } catch (err) {
-        console.error('[API ERROR] Failed to save config:', err);
-        res.status(500).json({ error: 'Failed to save config' });
-    }
-});
-
-// Universal Save (Legacy Support - Maps mostly to Config/History updates if strictly needed, 
-// but we encourage specific endpoints. For now, if frontend calls POST /api/db, we try to parse relevant parts)
-app.post('/api/db', async (req, res) => {
-    try {
-        const { users, config, history, email } = req.body;
-        console.log(`[API] Bulk sync for ${email}`, { config: !!config, history: !!history });
-        const db = await getDB();
-
-        // Transactional update attempt
-        await db.exec('BEGIN TRANSACTION');
-
-        if (config && email) {
-            const user = await db.get('SELECT id FROM users WHERE email = ?', email);
-            if (user) {
-                // Determine existing mapping to avoid overwriting with null if only partial config sent
-                const current = await db.get('SELECT * FROM user_config WHERE user_id = ?', user.id);
-                const finalToken = config.token !== undefined ? config.token : (current?.token || '');
-                const finalPhone = config.phoneId !== undefined ? config.phoneId : (current?.phoneId || '');
-                const finalWaba = config.wabaId !== undefined ? config.wabaId : (current?.wabaId || '');
-                const finalTemplate = config.templateName !== undefined ? config.templateName : (current?.templateName || '');
-                const finalMapping = config.mapping !== undefined ? JSON.stringify(config.mapping) : (current?.mapping || '{}');
-
-                await db.run(`INSERT OR REPLACE INTO user_config (user_id, token, phoneId, wabaId, templateName, mapping) 
-                              VALUES (?, ?, ?, ?, ?, ?)`,
-                    user.id, finalToken, finalPhone, finalWaba, finalTemplate, finalMapping);
-            }
+        if (!user) {
+            return res.status(404).json({ error: 'Usuário não encontrado' });
         }
 
-        // Users: We don't overwrite users blindly to avoid deleting. We assume frontend handles registration via specific route.
-        // But if provided and different, we might skip.
-
-        // History: If provided, we could append? For now, let's rely on server-side job history.
-
-        await db.exec('COMMIT');
-        res.json({ success: true });
+        res.json({
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            config: user.config ? {
+                token: user.config.token,
+                phoneId: user.config.phoneId,
+                wabaId: user.config.wabaId,
+                templateName: user.config.templateName,
+                mapping: JSON.parse(user.config.mapping || '{}')
+            } : null
+        });
     } catch (err) {
-        await db.exec('ROLLBACK');
-        console.error(err);
-        res.status(500).json({ error: 'Failed to sync database' });
+        console.error('[GET USER ERROR]', err);
+        res.status(500).json({ error: 'Erro ao buscar usuário' });
     }
 });
 
-// --- JOB STATE ---
-let activeJob = {
-    status: 'idle', // idle, sending, paused, completed, error
-    campaignData: [],
-    progress: { current: 0, total: 0 },
-    logs: [],
-    errors: [],
-    config: {}, // Current API conf
-    templateName: '',
-    dates: { old: '', new: '' },
-    shouldPause: false, // Flag to control pausing
-    abortController: null // To cancel fetch if needed (optional)
-};
+// Update config
+app.put('/api/config/:userId', async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const { token, phoneId, wabaId, templateName, mapping } = req.body;
+
+        const config = await prisma.userConfig.upsert({
+            where: { userId },
+            update: {
+                token: token ?? undefined,
+                phoneId: phoneId ?? undefined,
+                wabaId: wabaId ?? undefined,
+                templateName: templateName ?? undefined,
+                mapping: mapping ? JSON.stringify(mapping) : undefined
+            },
+            create: {
+                userId,
+                token: token || '',
+                phoneId: phoneId || '',
+                wabaId: wabaId || '',
+                templateName: templateName || '',
+                mapping: JSON.stringify(mapping || {})
+            }
+        });
+
+        res.json({ success: true, config });
+    } catch (err) {
+        console.error('[CONFIG ERROR]', err);
+        res.status(500).json({ error: 'Erro ao salvar configurações' });
+    }
+});
+
+// --- DISPATCH ROUTES ---
+
+// Get all dispatches for user
+app.get('/api/dispatch/:userId', async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+
+        const dispatches = await prisma.dispatch.findMany({
+            where: { userId },
+            orderBy: { createdAt: 'desc' },
+            include: {
+                _count: { select: { logs: true } }
+            }
+        });
+
+        res.json(dispatches.map(d => ({
+            ...d,
+            leadsData: undefined, // Don't send full leads data in list
+            logCount: d._count.logs
+        })));
+    } catch (err) {
+        console.error('[GET DISPATCHES ERROR]', err);
+        res.status(500).json({ error: 'Erro ao buscar disparos' });
+    }
+});
+
+// Get specific dispatch with logs
+app.get('/api/dispatch/:userId/:dispatchId', async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const dispatchId = parseInt(req.params.dispatchId);
+
+        const dispatch = await prisma.dispatch.findFirst({
+            where: { id: dispatchId, userId },
+            include: {
+                logs: {
+                    orderBy: { createdAt: 'desc' },
+                    take: 100
+                }
+            }
+        });
+
+        if (!dispatch) {
+            return res.status(404).json({ error: 'Disparo não encontrado' });
+        }
+
+        res.json(dispatch);
+    } catch (err) {
+        console.error('[GET DISPATCH ERROR]', err);
+        res.status(500).json({ error: 'Erro ao buscar disparo' });
+    }
+});
+
+// --- ACTIVE JOBS MAP ---
+const activeJobs = new Map(); // dispatchId -> { intervalId, shouldStop }
 
 // --- HELPER: SLEEP ---
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// --- HELPER: SEND WHATSAPP (Server Side) ---
+// --- HELPER: SEND WHATSAPP ---
 const sendWhatsApp = async (phone, config, templateName, variables) => {
     try {
+        // Normalize phone
+        let normalizedPhone = String(phone).replace(/\D/g, '');
+        if (normalizedPhone && !normalizedPhone.startsWith('55')) {
+            normalizedPhone = '55' + normalizedPhone;
+        }
+
         const url = `https://graph.facebook.com/v21.0/${config.phoneId}/messages`;
+
+        // Ensure template name is trimmed
+        const finalTemplateName = String(templateName).trim();
+
         const payload = {
             messaging_product: "whatsapp",
-            to: phone,
+            to: normalizedPhone,
             type: "template",
             template: {
-                name: templateName,
+                name: finalTemplateName,
                 language: { code: "pt_BR" },
                 components: [
                     {
                         type: "body",
-                        parameters: variables.map(v => ({ type: "text", text: String(v) }))
+                        parameters: variables.map(v => ({ type: "text", text: String(v || '').trim() }))
                     }
                 ]
             }
         };
+
+        console.log(`[META PAYLOAD] To: ${normalizedPhone} | Template: ${finalTemplateName} | Params: ${variables.length}`);
+
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
         const response = await fetch(url, {
             method: 'POST',
@@ -184,96 +300,370 @@ const sendWhatsApp = async (phone, config, templateName, variables) => {
                 'Authorization': `Bearer ${config.token}`,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            signal: controller.signal
         });
+
+        clearTimeout(timeoutId);
 
         const data = await response.json();
         if (!response.ok) {
+            console.error('[META ERROR]', JSON.stringify(data, null, 2));
+            console.error('[PAYLOAD SENT]', JSON.stringify(payload, null, 2));
             throw new Error(data.error?.message || 'Erro desconhecido na API do Meta');
         }
-        return { success: true, data };
+
+        return { success: true, data, phone: normalizedPhone };
     } catch (error) {
-        return { success: false, error: error.message };
+        if (error.name === 'AbortError') {
+            return { success: false, error: 'Timeout: Meta API demorou muito para responder', phone };
+        }
+        return { success: false, error: error.message, phone };
     }
 };
 
-// --- BACKGROUND WORKER ---
-const processCampaign = async () => {
-    activeJob.status = 'sending';
-    const { campaignData, config, templateName, dates } = activeJob;
 
-    console.log(`[JOB] Starting campaign for ${campaignData.length} contacts...`);
 
-    for (let i = activeJob.progress.current; i < campaignData.length; i++) {
-        // CHECK PAUSE/CANCEL
-        if (activeJob.status === 'paused') {
-            console.log(`[JOB] Paused at index ${i}`);
+// --- PROCESS DISPATCH (Background Worker) ---
+async function processDispatch(dispatchId) {
+    console.log(`[JOB ${dispatchId}] Starting...`);
+
+    try {
+        const dispatch = await prisma.dispatch.findUnique({
+            where: { id: dispatchId },
+            include: { user: { include: { config: true } } }
+        });
+
+        if (!dispatch || !dispatch.user.config) {
+            console.error(`[JOB ${dispatchId}] No dispatch or config found`);
             return;
         }
-        if (activeJob.status === 'idle' || activeJob.status === 'completed') {
-            console.log(`[JOB] Stopped.`);
-            return;
+
+        const config = dispatch.user.config;
+        const leads = JSON.parse(dispatch.leadsData);
+        const userId = dispatch.userId;
+
+        // Ensure status is running if it was idle or paused
+        if (dispatch.status !== 'running') {
+            await prisma.dispatch.update({
+                where: { id: dispatchId },
+                data: { status: 'running' }
+            });
+            broadcast(userId, 'dispatch:status', { dispatchId, status: 'running' });
         }
 
-        const row = campaignData[i];
+        for (let i = dispatch.currentIndex; i < leads.length; i++) {
+            // Check if job should stop
+            const job = activeJobs.get(dispatchId);
+            if (!job || job.shouldStop) {
+                console.log(`[JOB ${dispatchId}] Paused at index ${i}`);
+                await prisma.dispatch.update({
+                    where: { id: dispatchId },
+                    data: { status: 'paused', currentIndex: i }
+                });
+                broadcast(userId, 'dispatch:status', { dispatchId, status: 'paused' });
+                activeJobs.delete(dispatchId);
+                return;
+            }
 
-        // Prepare Variables
-        // LOGIC: If template expects {{1}} as name, and date logic is separate
-        // For 'alteracao_entrega_ambev', we assume variables in order? 
-        // Or strictly mapping? For simplicity, we assume the specific template structure:
-        // {{1}} = Nome Cliente, {{2}} = Pedido, {{3}} = Data Antiga, {{4}} = Data Nova
-        // We will respect the previous logic: [Nome, Pedido, DataAntiga, DataNova]
+            const lead = leads[i];
+            const phone = lead['Tel. Promax'] || lead['phone'] || lead['telefone'] || lead['Tel.'];
 
-        // DATE LOGIC REPLICATION (Server Side)
-        const getRelativeDate = (dateStr) => {
-            // Basic implementation: if dateStr matches today/tomorrow logic
-            // For strict MVP, we pass the raw strings from the frontend 'dates' object
-            // which already has the logic or user input.
-            // Wait, the frontend passed 'dates'. We use them directly.
-            return dateStr;
+            if (!phone) {
+                console.warn(`[JOB ${dispatchId}] Skipping lead at index ${i} - No phone found`);
+                await prisma.dispatch.update({
+                    where: { id: dispatchId },
+                    data: { currentIndex: i + 1 }
+                });
+                continue;
+            }
+
+            const params = [
+                String(lead['Nome fantasia'] || lead['fantasy_name'] || lead['nome'] || 'Cliente').substring(0, 100),
+                String(lead['Nº do Pedido'] || lead['order_number'] || lead['pedido'] || 'N/A').substring(0, 100),
+                String(dispatch.dateOld || 'hoje').substring(0, 50),
+                String(dispatch.dateNew || 'amanhã').substring(0, 50)
+            ];
+
+            const result = await sendWhatsApp(phone, config, dispatch.templateName, params);
+
+            // Create log
+            await prisma.dispatchLog.create({
+                data: {
+                    dispatchId,
+                    phone: String(result.phone || phone || ''),
+                    status: result.success ? 'success' : 'error',
+                    message: result.success ? null : result.error
+                }
+            });
+
+            // Update database state
+            const updateData = {
+                currentIndex: i + 1,
+            };
+            if (result.success) {
+                updateData.successCount = { increment: 1 };
+            } else {
+                updateData.errorCount = { increment: 1 };
+            }
+
+            const updated = await prisma.dispatch.update({
+                where: { id: dispatchId },
+                data: updateData
+            });
+
+            // Broadcast progress to UI
+            broadcast(userId, 'dispatch:progress', {
+                dispatchId,
+                currentIndex: i + 1,
+                totalLeads: leads.length,
+                successCount: updated.successCount,
+                errorCount: updated.errorCount,
+                status: 'running',
+                lastLog: {
+                    phone: result.phone || phone,
+                    status: result.success ? 'success' : 'error',
+                    message: result.error || null
+                }
+            });
+
+            // Rate limit (approx 5 msgs per second)
+            await sleep(200);
+        }
+
+        // Loop finished naturally
+        console.log(`[JOB ${dispatchId}] Completed successfully`);
+        await prisma.dispatch.update({
+            where: { id: dispatchId },
+            data: { status: 'completed' }
+        });
+
+        broadcast(userId, 'dispatch:status', { dispatchId, status: 'completed' });
+        broadcast(userId, 'dispatch:complete', { dispatchId });
+        activeJobs.delete(dispatchId);
+
+    } catch (err) {
+        console.error(`[JOB ${dispatchId}] Fatal error:`, err);
+        // Attempt to set status to error so it's not stuck 'running'
+        try {
+            await prisma.dispatch.update({
+                where: { id: dispatchId },
+                data: { status: 'error' }
+            });
+            // We don't have direct access to userId in some catch paths, 
+            // but we can try to find it or just let the polling handle it.
+        } catch (subErr) {
+            console.error('[CRITICAL] Failed to update job status to error:', subErr);
+        }
+    }
+}
+
+
+// Create and start dispatch
+app.post('/api/dispatch/:userId', async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const { templateName, dateOld, dateNew, leads } = req.body;
+
+        if (!leads || !leads.length) {
+            return res.status(400).json({ error: 'Nenhum lead fornecido' });
+        }
+
+        // Check for existing running dispatch for this user
+        const running = await prisma.dispatch.findFirst({
+            where: { userId, status: { in: ['running', 'idle'] } }
+        });
+
+        if (running) {
+            return res.status(400).json({ error: 'Já existe um disparo em andamento' });
+        }
+
+        // Create dispatch
+        const dispatch = await prisma.dispatch.create({
+            data: {
+                userId,
+                templateName,
+                dateOld,
+                dateNew,
+                totalLeads: leads.length,
+                leadsData: JSON.stringify(leads),
+                status: 'running'
+            }
+        });
+
+        // Register job
+        activeJobs.set(dispatch.id, { shouldStop: false });
+
+        // Start processing (async)
+        processDispatch(dispatch.id);
+
+        res.json({ success: true, dispatchId: dispatch.id });
+    } catch (err) {
+        console.error('[CREATE DISPATCH ERROR]', err);
+        res.status(500).json({ error: 'Erro ao criar disparo' });
+    }
+});
+
+// Control dispatch (pause/resume/stop)
+app.post('/api/dispatch/:dispatchId/control', async (req, res) => {
+    try {
+        const dispatchId = parseInt(req.params.dispatchId);
+        const { action } = req.body; // pause, resume, stop
+
+        const dispatch = await prisma.dispatch.findUnique({
+            where: { id: dispatchId }
+        });
+
+        if (!dispatch) {
+            return res.status(404).json({ error: 'Disparo não encontrado' });
+        }
+
+        if (action === 'pause') {
+            const job = activeJobs.get(dispatchId);
+            if (job) job.shouldStop = true;
+            await prisma.dispatch.update({
+                where: { id: dispatchId },
+                data: { status: 'paused' }
+            });
+            broadcast(dispatch.userId, 'dispatch:status', { dispatchId, status: 'paused' });
+        } else if (action === 'resume') {
+            // Check if another job is running
+            const running = await prisma.dispatch.findFirst({
+                where: { userId: dispatch.userId, status: 'running' }
+            });
+
+            if (running && running.id !== dispatchId) {
+                return res.status(400).json({ error: 'Já existe um outro disparo em andamento.' });
+            }
+
+            activeJobs.set(dispatchId, { shouldStop: false });
+            processDispatch(dispatchId);
+            // status update is handled inside processDispatch
+        } else if (action === 'stop') {
+            const job = activeJobs.get(dispatchId);
+            if (job) job.shouldStop = true;
+            await prisma.dispatch.update({
+                where: { id: dispatchId },
+                data: { status: 'stopped' }
+            });
+            broadcast(dispatch.userId, 'dispatch:status', { dispatchId, status: 'stopped' });
+        }
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[CONTROL DISPATCH ERROR]', err);
+        res.status(500).json({ error: 'Erro ao controlar disparo' });
+    }
+});
+
+// Retry failed leads only
+app.post('/api/dispatch/:dispatchId/retry', async (req, res) => {
+    try {
+        const dispatchId = parseInt(req.params.dispatchId);
+
+        const dispatch = await prisma.dispatch.findUnique({
+            where: { id: dispatchId },
+            include: { logs: { orderBy: { createdAt: 'desc' } } }
+        });
+
+        if (!dispatch) return res.status(404).json({ error: 'Disparo não encontrado' });
+
+        // Get leads that failed (status 'error')
+        // We match by phone number in logs
+        const failedLogs = dispatch.logs.filter(l => l.status === 'error');
+        if (failedLogs.length === 0) {
+            return res.status(400).json({ error: 'Não há envios com erro para reintentar.' });
+        }
+
+        const allLeads = JSON.parse(dispatch.leadsData);
+
+        // Helper to normalize phone numbers consistently
+        const normalize = (p) => {
+            let n = String(p || '').replace(/\D/g, '');
+            if (n && !n.startsWith('55')) n = '55' + n;
+            return n;
         };
 
-        const params = [
-            row['Nome fantasia'] || row['fantasy_name'] || 'Cliente',
-            row['Nº do Pedido'] || row['order_number'] || 'N/A',
-            dates.old,
-            dates.new
-        ];
+        const failedPhones = new Set(failedLogs.map(l => normalize(l.phone)));
 
-        // Send
-        const res = await sendWhatsApp(row['Tel. Promax'] || row['phone'], config, templateName, params);
+        const leadsToRetry = allLeads.filter(lead => {
+            const p = normalize(lead['Tel. Promax'] || lead['phone'] || lead['telefone'] || lead['Tel.']);
+            return p && failedPhones.has(p);
+        });
 
-        // Update State
-        if (res.success) {
-            activeJob.logs.unshift({ id: i, phone: row['phone'], status: 'success', time: new Date().toLocaleTimeString() });
-        } else {
-            activeJob.errors.push({
-                id: i,
-                phone: row['phone'],
-                error: res.error,
-                row_data: row // Save for retry
-            });
-            activeJob.logs.unshift({ id: i, phone: row['phone'], status: 'error', msg: res.error, time: new Date().toLocaleTimeString() });
+        if (leadsToRetry.length === 0) {
+            console.error('[RETRY] Could not map failed phones back to leads. Failed phones:', Array.from(failedPhones));
+            return res.status(400).json({ error: 'Não foi possível mapear os erros para os leads originais.' });
         }
 
-        activeJob.progress.current = i + 1;
 
-        // Rate Limit (Safety)
-        await sleep(200); // 5 msg/sec max
+        // Create a NEW dispatch for these retries (easier to track)
+        const newDispatch = await prisma.dispatch.create({
+            data: {
+                userId: dispatch.userId,
+                templateName: dispatch.templateName,
+                dateOld: dispatch.dateOld,
+                dateNew: dispatch.dateNew,
+                totalLeads: leadsToRetry.length,
+                leadsData: JSON.stringify(leadsToRetry),
+                status: 'running'
+            }
+        });
+
+        activeJobs.set(newDispatch.id, { shouldStop: false });
+        processDispatch(newDispatch.id);
+
+        res.json({ success: true, dispatchId: newDispatch.id, message: `Iniciado reenvio para ${leadsToRetry.length} leads.` });
+
+    } catch (err) {
+        console.error('[RETRY ERROR]', err);
+        res.status(500).json({ error: 'Erro ao reintentar disparos' });
     }
+});
 
-    activeJob.status = 'completed';
-    console.log(`[JOB] Completed!`);
-};
 
-// --- INDIVIDUAL MESSAGE SENDER ---
-const sendSingleMessage = async (phone, text, config) => {
+// --- MESSAGES ROUTES ---
+
+// Get received messages
+app.get('/api/messages', async (req, res) => {
     try {
+        const messages = await prisma.receivedMessage.findMany({
+            orderBy: { createdAt: 'desc' },
+            take: 200
+        });
+        res.json(messages);
+    } catch (err) {
+        console.error('[GET MESSAGES ERROR]', err);
+        res.status(500).json({ error: 'Erro ao buscar mensagens' });
+    }
+});
+
+// Send individual message
+app.post('/api/send-message', async (req, res) => {
+    try {
+        const { userId, phone, text } = req.body;
+
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            include: { config: true }
+        });
+
+        if (!user || !user.config) {
+            return res.status(400).json({ error: 'Configuração não encontrada' });
+        }
+
+        const config = user.config;
+
+        let normalizedPhone = String(phone).replace(/\D/g, '');
+        if (!normalizedPhone.startsWith('55')) {
+            normalizedPhone = '55' + normalizedPhone;
+        }
+
         const url = `https://graph.facebook.com/v21.0/${config.phoneId}/messages`;
         const payload = {
             messaging_product: "whatsapp",
             recipient_type: "individual",
-            to: phone,
+            to: normalizedPhone,
             type: "text",
             text: { body: text }
         };
@@ -289,17 +679,28 @@ const sendSingleMessage = async (phone, text, config) => {
 
         const data = await response.json();
         if (!response.ok) {
-            throw new Error(data.error?.message || 'Erro ao enviar mensagem individual');
+            throw new Error(data.error?.message || 'Erro ao enviar mensagem');
         }
-        return { success: true, data };
-    } catch (error) {
-        return { success: false, error: error.message };
+
+        // Log sent message
+        await prisma.receivedMessage.create({
+            data: {
+                contactPhone: normalizedPhone,
+                contactName: 'Eu',
+                messageBody: text,
+                isFromMe: true
+            }
+        });
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[SEND MESSAGE ERROR]', err);
+        res.status(500).json({ error: err.message });
     }
-};
+});
 
-// --- WEBHOOK ENDPOINTS ---
+// --- WEBHOOK ---
 
-// GET: Verification for Meta
 app.get('/webhook', (req, res) => {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
@@ -312,30 +713,39 @@ app.get('/webhook', (req, res) => {
         } else {
             res.sendStatus(403);
         }
+    } else {
+        res.sendStatus(400);
     }
 });
 
-// POST: Receive messages from Meta
 app.post('/webhook', async (req, res) => {
     try {
         const body = req.body;
 
         if (body.object === 'whatsapp_business_account') {
-            if (body.entry && body.entry[0].changes && body.entry[0].changes[0].value.messages) {
+            if (body.entry?.[0]?.changes?.[0]?.value?.messages) {
                 const message = body.entry[0].changes[0].value.messages[0];
                 const contact = body.entry[0].changes[0].value.contacts[0];
 
-                const from = message.from; // Phone number
-                const name = contact.profile.name || 'Cliente';
-                const text = message.text ? message.text.body : '[Mensagem de mídia/outro tipo]';
+                const from = message.from;
+                const name = contact.profile?.name || 'Cliente';
+                const text = message.text ? message.text.body : '[Mídia/Outro tipo]';
 
-                console.log(`[WEBHOOK] Nova mensagem de ${name} (${from}): ${text}`);
+                console.log(`[WEBHOOK] Message from ${name} (${from}): ${text}`);
 
-                const db = await getDB();
-                await db.run(
-                    'INSERT INTO received_messages (contact_phone, contact_name, message_body, is_from_me) VALUES (?, ?, ?, ?)',
-                    from, name, text, 0
-                );
+                await prisma.receivedMessage.create({
+                    data: {
+                        contactPhone: from,
+                        contactName: name,
+                        messageBody: text,
+                        isFromMe: false
+                    }
+                });
+
+                // Broadcast to all connected clients
+                clients.forEach((sockets, userId) => {
+                    broadcast(userId, 'message:received', { from, name, text });
+                });
             }
             res.sendStatus(200);
         } else {
@@ -347,102 +757,69 @@ app.post('/webhook', async (req, res) => {
     }
 });
 
-// --- API ROUTES FOR JOB ---
-
-app.get('/api/status', (req, res) => {
-    res.json({
-        status: activeJob.status,
-        progress: activeJob.progress,
-        logs: activeJob.logs.slice(0, 50), // Send only recent logs
-        errors: activeJob.errors
-    });
-});
-
-app.post('/api/start-campaign', (req, res) => {
-    const { data, config, templateName, dates } = req.body;
-
-    if (activeJob.status === 'sending') {
-        return res.status(400).json({ error: 'Já existe uma campanha em andamento.' });
-    }
-
-    // Reset Job
-    activeJob = {
-        status: 'idle',
-        campaignData: data,
-        progress: { current: 0, total: data.length },
-        logs: [],
-        errors: [],
-        config,
-        templateName,
-        dates,
-        shouldPause: false
-    };
-
-    // Trigger Worker (Async - do not await)
-    processCampaign();
-
-    res.json({ success: true, message: 'Campanha iniciada em background.' });
-});
-
-app.post('/api/control', (req, res) => {
-    const { action } = req.body; // pause, resume, stop
-
-    if (action === 'pause') {
-        activeJob.status = 'paused';
-    } else if (action === 'resume') {
-        if (activeJob.status === 'paused') {
-            // Resume logic: just call processCampaign again, it picks up from progress.current
-            processCampaign();
-        }
-    } else if (action === 'stop') {
-        activeJob.status = 'idle';
-        activeJob.progress.current = 0; // Reset? Or just stop?
-        // Usually stop means cancel
-    }
-
-    res.json({ success: true, status: activeJob.status });
-});
-
-app.post('/api/send-message', async (req, res) => {
+// --- LEGACY COMPAT: /api/status for polling fallback ---
+app.get('/api/status/:userId', async (req, res) => {
     try {
-        const { phone, text, email } = req.body;
-        const db = await getDB();
+        const userId = parseInt(req.params.userId);
 
-        // Find user config
-        const user = await db.get('SELECT id FROM users WHERE email = ?', email);
-        if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
+        const dispatch = await prisma.dispatch.findFirst({
+            where: {
+                userId,
+                status: { in: ['running', 'paused'] }
+            },
+            include: {
+                logs: {
+                    orderBy: { createdAt: 'desc' },
+                    take: 50
+                }
+            }
+        });
 
-        const config = await db.get('SELECT * FROM user_config WHERE user_id = ?', user.id);
-        if (!config || !config.token || !config.phoneId) {
-            return res.status(400).json({ error: 'Configuração da Meta incompleta' });
+        if (!dispatch) {
+            return res.json({ status: 'idle', progress: { current: 0, total: 0 }, logs: [], errors: [] });
         }
 
-        const result = await sendSingleMessage(phone, text, config);
-
-        if (result.success) {
-            // Log in received_messages as from_me = 1
-            await db.run(
-                'INSERT INTO received_messages (contact_phone, contact_name, message_body, is_from_me) VALUES (?, ?, ?, ?)',
-                phone, 'Eu', text, 1
-            );
-            res.json({ success: true });
-        } else {
-            res.status(500).json({ error: result.error });
-        }
+        res.json({
+            dispatchId: dispatch.id,
+            status: dispatch.status,
+            progress: {
+                current: dispatch.currentIndex,
+                total: dispatch.totalLeads
+            },
+            successCount: dispatch.successCount,
+            errorCount: dispatch.errorCount,
+            logs: dispatch.logs.map(l => ({
+                phone: l.phone,
+                status: l.status,
+                message: l.message,
+                time: l.createdAt.toLocaleTimeString()
+            })),
+            errors: dispatch.logs.filter(l => l.status === 'error')
+        });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Falha ao enviar mensagem' });
+        console.error('[STATUS ERROR]', err);
+        res.status(500).json({ error: 'Erro ao buscar status' });
     }
 });
 
-// Serve React Static Files (Production)
+// --- SERVE STATIC FILES ---
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// Handle React Routing
 app.use((req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+// --- START SERVER ---
+const FINAL_PORT = 3000;
+server.listen(FINAL_PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server running on http://localhost:${FINAL_PORT}`);
+    console.log(`📡 WebSocket ready on ws://localhost:${FINAL_PORT}`);
+});
+
+
+// --- GRACEFUL SHUTDOWN ---
+process.on('SIGINT', async () => {
+    console.log('Shutting down...');
+    await prisma.$disconnect();
+    process.exit(0);
 });

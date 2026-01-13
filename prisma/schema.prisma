@@ -1,0 +1,77 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./database.db"
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String?
+  password  String
+  createdAt DateTime @default(now())
+
+  config     UserConfig?
+  dispatches Dispatch[]
+}
+
+model UserConfig {
+  id           Int    @id @default(autoincrement())
+  userId       Int    @unique
+  user         User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  token        String @default("")
+  phoneId      String @default("")
+  wabaId       String @default("")
+  templateName String @default("")
+  mapping      String @default("{}") // JSON string
+}
+
+model Dispatch {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  templateName String
+  dateOld      String
+  dateNew      String
+
+  status       String   @default("idle") // idle, running, paused, completed, error
+  totalLeads   Int      @default(0)
+  currentIndex Int      @default(0)
+  successCount Int      @default(0)
+  errorCount   Int      @default(0)
+
+  leadsData    String   @default("[]") // JSON array of leads
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  logs         DispatchLog[]
+}
+
+model DispatchLog {
+  id         Int      @id @default(autoincrement())
+  dispatchId Int
+  dispatch   Dispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+
+  phone      String
+  status     String   // success, error
+  message    String?
+  createdAt  DateTime @default(now())
+}
+
+model ReceivedMessage {
+  id           Int      @id @default(autoincrement())
+  contactPhone String
+  contactName  String
+  messageBody  String
+  isFromMe     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+}
