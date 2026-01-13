@@ -6,12 +6,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npx prisma generate && vite build",
     "preview": "vite preview",
     "start": "npx prisma generate && npx prisma db push && node server.js",
     "server": "node server.js",
-    "prisma:generate": "prisma generate",
+    "prisma:generate": "npx prisma generate",
     "prisma:migrate": "npx prisma db push",
+    "postinstall": "npx prisma generate",
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
