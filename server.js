@@ -9,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 80;
 const WEBHOOK_VERIFY_TOKEN = 'ambev_webhook_token_2026'; // Should match meta dashboard
 
 // Initialize DB on start
@@ -407,7 +407,7 @@ app.post('/api/send-message', async (req, res) => {
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // Handle React Routing
-app.get('*', (req, res) => {
+app.get('/*', (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 

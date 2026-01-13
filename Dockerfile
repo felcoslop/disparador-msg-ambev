@@ -15,14 +15,15 @@ COPY . .
 RUN npm run build
 
 # Production stage
-FROM node:20-slim
+FROM node:20
 
 WORKDIR /app
 
-# Copy only production dependencies (optional but cleaner)
+# Copy package files and install ALL dependencies (including dev if needed for build, 
+# but here we just need sqlite3 to compile correctly)
 COPY package.json ./
 COPY package-lock.json* ./
-RUN npm install --production --legacy-peer-deps
+RUN npm install --legacy-peer-deps
 
 # Copy built frontend from build stage
 COPY --from=build /app/dist ./dist
@@ -31,9 +32,6 @@ COPY --from=build /app/dist ./dist
 COPY server.js .
 COPY database.js .
 
-# Create an empty database if it doesn't exist (it will be initialized by server.js anyway)
-# RUN touch database.sqlite
-
-EXPOSE 3000
+EXPOSE 80
 
 CMD ["node", "server.js"]
