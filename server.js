@@ -96,15 +96,27 @@ app.post('/api/config', async (req, res) => {
 // but we encourage specific endpoints. For now, if frontend calls POST /api/db, we try to parse relevant parts)
 app.post('/api/db', async (req, res) => {
     try {
-        const { users, config, history } = req.body;
+        const { users, config, history, email } = req.body;
         const db = await getDB();
 
         // Transactional update attempt
         await db.exec('BEGIN TRANSACTION');
 
-        if (config) {
-            await db.run('UPDATE config SET token = ?, phoneId = ?, wabaId = ? WHERE id = 1',
-                config.token, config.phoneId, config.wabaId);
+        if (config && email) {
+            const user = await db.get('SELECT id FROM users WHERE email = ?', email);
+            if (user) {
+                // Determine existing mapping to avoid overwriting with null if only partial config sent
+                const current = await db.get('SELECT * FROM user_config WHERE user_id = ?', user.id);
+                const finalToken = config.token !== undefined ? config.token : (current?.token || '');
+                const finalPhone = config.phoneId !== undefined ? config.phoneId : (current?.phoneId || '');
+                const finalWaba = config.wabaId !== undefined ? config.wabaId : (current?.wabaId || '');
+                const finalTemplate = config.templateName !== undefined ? config.templateName : (current?.templateName || '');
+                const finalMapping = config.mapping !== undefined ? JSON.stringify(config.mapping) : (current?.mapping || '{}');
+
+                await db.run(`INSERT OR REPLACE INTO user_config (user_id, token, phoneId, wabaId, templateName, mapping) 
+                              VALUES (?, ?, ?, ?, ?, ?)`,
+                    user.id, finalToken, finalPhone, finalWaba, finalTemplate, finalMapping);
+            }
         }
 
         // Users: We don't overwrite users blindly to avoid deleting. We assume frontend handles registration via specific route.

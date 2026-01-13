@@ -127,7 +127,8 @@ export default function App() {
                 users: newData.users || users,
                 config: newData.config || config,
                 history: newData.history || history,
-                receivedMessages: newData.receivedMessages || receivedMessages
+                receivedMessages: newData.receivedMessages || receivedMessages,
+                email: user?.email
             };
 
             await fetch('/api/db', {
