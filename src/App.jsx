@@ -91,6 +91,13 @@ export default function App() {
                 if (data.config) {
                     setConfig(data.config);
                     localStorage.setItem('ambev_config_backup', JSON.stringify(data.config));
+
+                    if (data.config.templateName) {
+                        setTemplateName(data.config.templateName);
+                    }
+                    if (data.config.mapping) {
+                        setMapping(data.config.mapping);
+                    }
                 }
 
                 if (data.history) {
@@ -149,7 +156,7 @@ export default function App() {
         // Periodically refresh received messages every 10s
         const interval = setInterval(fetchDb, 10000);
         return () => clearInterval(interval);
-    }, []);
+    }, [user?.email]);
 
     const resetApp = async () => {
         if (window.confirm("Isso apagará todas as configurações e histórico do servidor. Continuar?")) {
@@ -1102,7 +1109,12 @@ function Dashboard({
                                             await fetch('/api/config', {
                                                 method: 'POST',
                                                 headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ ...tempConfig, email: user?.email })
+                                                body: JSON.stringify({
+                                                    ...tempConfig,
+                                                    email: user?.email,
+                                                    templateName,
+                                                    mapping
+                                                })
                                             });
                                             // await saveDb({ config: tempConfig }); // Legacy removed
                                             setIsEditing(false);

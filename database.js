@@ -35,9 +35,22 @@ export async function initializeDB() {
             token TEXT,
             phoneId TEXT,
             wabaId TEXT,
+            templateName TEXT,
+            mapping TEXT,
             FOREIGN KEY(user_id) REFERENCES users(id)
         );
     `);
+
+    // Migration: Add new columns if they don't exist
+    const columns = await db.all("PRAGMA table_info(user_config)");
+    const columnNames = columns.map(c => c.name);
+
+    if (!columnNames.includes('templateName')) {
+        await db.exec('ALTER TABLE user_config ADD COLUMN templateName TEXT');
+    }
+    if (!columnNames.includes('mapping')) {
+        await db.exec('ALTER TABLE user_config ADD COLUMN mapping TEXT');
+    }
 
     // History Table
     await db.exec(`

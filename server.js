@@ -34,12 +34,17 @@ app.get('/api/db', async (req, res) => {
         const receivedMessages = await db.all('SELECT * FROM received_messages ORDER BY id DESC');
 
         // Fetch config ONLY for the specific user if email provided
-        let userConfig = { token: '', phoneId: '', wabaId: '' };
+        let userConfig = { token: '', phoneId: '', wabaId: '', templateName: '', mapping: {} };
         if (email) {
             const user = await db.get('SELECT id FROM users WHERE email = ?', email);
             if (user) {
                 const conf = await db.get('SELECT * FROM user_config WHERE user_id = ?', user.id);
-                if (conf) userConfig = conf;
+                if (conf) {
+                    userConfig = {
+                        ...conf,
+                        mapping: conf.mapping ? JSON.parse(conf.mapping) : {}
+                    };
+                }
             }
         }
 
@@ -70,14 +75,15 @@ app.post('/api/register', async (req, res) => {
 
 app.post('/api/config', async (req, res) => {
     try {
-        const { email, token, phoneId, wabaId } = req.body; // Expect email to link config
+        const { email, token, phoneId, wabaId, templateName, mapping } = req.body; // Expect email to link config
         const db = await getDB();
         const user = await db.get('SELECT id FROM users WHERE email = ?', email);
 
         if (!user) return res.status(404).json({ error: 'User not found' });
 
-        await db.run(`INSERT OR REPLACE INTO user_config (user_id, token, phoneId, wabaId) 
-                      VALUES (?, ?, ?, ?)`, user.id, token, phoneId, wabaId);
+        await db.run(`INSERT OR REPLACE INTO user_config (user_id, token, phoneId, wabaId, templateName, mapping) 
+                      VALUES (?, ?, ?, ?, ?, ?)`,
+            user.id, token, phoneId, wabaId, templateName, JSON.stringify(mapping));
 
         res.json({ success: true });
     } catch (err) {
