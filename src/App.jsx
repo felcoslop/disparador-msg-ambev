@@ -4,10 +4,9 @@ import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 
 // --- Global Constants ---
-const DEFAULT_USER = {
-    email: '99847120@ab-inbev.com',
-    password: 'admin'
-};
+// --- Global Constants ---
+// Default user removed for security
+// const DEFAULT_USER = { ... };
 
 const AMBEV_COLORS = {
     blue: '#280091',
@@ -42,7 +41,7 @@ export default function App() {
     const [view, setView] = useState(user ? 'dashboard' : 'login'); // Auto-redirect if logged in
 
     // State - Initialized as empty, populated ONLY by API (Server synchronization)
-    const [users, setUsers] = useState([DEFAULT_USER]);
+    const [users, setUsers] = useState([]);
     const [config, setConfig] = useState({ token: '', phoneId: '', wabaId: '' });
     const [history, setHistory] = useState([]);
     const [receivedMessages, setReceivedMessages] = useState([]);
@@ -147,7 +146,7 @@ export default function App() {
         if (window.confirm("Isso apagará todas as configurações e histórico do servidor. Continuar?")) {
             // Reset to defaults
             const defaultData = {
-                users: [DEFAULT_USER],
+                users: [],
                 history: [],
                 config: { token: '', phoneId: '', wabaId: '' },
                 receivedMessages: []
@@ -162,26 +161,14 @@ export default function App() {
         const cleanEmail = email.trim().toLowerCase();
         const cleanPass = password.trim();
 
-        // 1. Try Direct Bypass first (Safe Mode)
-        if (cleanEmail === DEFAULT_USER.email.toLowerCase() && cleanPass === DEFAULT_USER.password) {
-            setUser(DEFAULT_USER);
-            setView('dashboard');
-            return;
-        }
-
-        // 2. Database Inspection
+        // Database Inspection
         const userInDb = users.find(u => u.email.trim().toLowerCase() === cleanEmail);
 
-        if (userInDb) {
-            // User exists, check password
-            if (userInDb.password.trim() === cleanPass) {
-                setUser(userInDb);
-                setView('dashboard');
-            } else {
-                alert(`Senha incorreta para ${userInDb.email}.`);
-            }
+        if (userInDb && userInDb.password.trim() === cleanPass) {
+            setUser(userInDb);
+            setView('dashboard');
         } else {
-            alert(`Usuário ${cleanEmail} não encontrado. Se você acabou de criar no PC, aguarde 2 segundos e tente novamente.`);
+            alert('E-mail ou senha incorretos.');
         }
     };
 
@@ -207,10 +194,10 @@ export default function App() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: cleanEmail, password: cleanPass })
             });
-            alert('Usuário cadastrado com sucesso!');
+            window.alert('Usuário cadastrado com sucesso!');
             setView('login');
         } catch (e) {
-            alert('Erro ao salvar no banco.' + e.message);
+            window.alert('Erro ao realizar cadastro. Tente novamente.');
         }
     };
 
