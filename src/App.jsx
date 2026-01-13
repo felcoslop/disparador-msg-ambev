@@ -54,8 +54,12 @@ export default function App() {
     // UI State (not persisted)
     const [campaignData, setCampaignData] = useState(null);
     const [headers, setHeaders] = useState([]);
-    const [mapping, setMapping] = useState({});
-    const [templateName, setTemplateName] = useState('');
+    const [mapping, setMapping] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('ambev_mapping_backup')) || {}; } catch { return {}; }
+    });
+    const [templateName, setTemplateName] = useState(() => {
+        return localStorage.getItem('ambev_template_name_backup') || '';
+    });
     const [templatePreview, setTemplatePreview] = useState(null);
     const [dates, setDates] = useState({ old: '', new: '' });
     const [sendingStatus, setSendingStatus] = useState('idle');
@@ -129,6 +133,15 @@ export default function App() {
             // Non-blocking error. User is safe locally.
         }
     };
+
+    // Persistence Effects for UI State
+    useEffect(() => {
+        localStorage.setItem('ambev_template_name_backup', templateName);
+    }, [templateName]);
+
+    useEffect(() => {
+        localStorage.setItem('ambev_mapping_backup', JSON.stringify(mapping));
+    }, [mapping]);
 
     // Load data on mount
     useEffect(() => {
@@ -637,8 +650,12 @@ function Dashboard({
     }, [sendingStatus]);
 
     const startSending = async () => {
-        if (!config.token || !config.phoneId || !templateName) {
-            alert('Configure as credenciais do Meta e o nome do template primeiro.');
+        if (!config.token || !config.phoneId) {
+            alert('Configure as credenciais do Meta na aba Ajustes primeiro.');
+            return;
+        }
+        if (!templateName) {
+            alert('Por favor, informe o Nome do Modelo (template) configurado na Meta.');
             return;
         }
 
