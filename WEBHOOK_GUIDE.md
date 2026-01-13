@@ -1,47 +1,51 @@
-# Guia: Recebendo Mensagens via Webhook (Meta API)
+# Guia: Configuração de Webhook no Meta (WhatsApp)
 
-Para que a aba **Recebidas** funcione em tempo real, você precisa configurar um **Webhook** no seu aplicativo da Meta.
+Este guia explica como configurar o Webhook no Painel da Meta para que o sistema receba mensagens em tempo real na aba **Recebidas**.
 
-## ⚠️ O Desafio Técnico
-O sistema atual é um **Frontend (React)**. Navegadores não podem receber mensagens diretamente da Meta por razões de segurança e arquitetura.
+## 1. Localização no Painel da Meta
+1. Acesse o [Meta for Developers](https://developers.facebook.com/).
+2. Selecione o seu App da Ambev/Disparador.
+3. No menu lateral, expanda **WhatsApp** e clique em **Configuração**.
 
-Para resolver isso, você tem duas opções principais:
+## 2. Configurando o Webhook
+Localize a seção **Webhooks** e clique em **Editar/Configurar**:
 
----
+- **URL de retorno (Callback URL):** 
+  `https://evolution-eric.hfzba0.easypanel.host/webhook`
+- **Token de verificação:** 
+  `ambev_webhook_token_2026` 
+  *(Este token deve ser o mesmo configurado no backend)*
 
-### Opção 1: Usar o Easypanel com um "Proxy" (Recomendado)
-Você pode criar um pequeno serviço (Backend) no Easypanel (usando Node.js ou Python) que recebe a mensagem da Meta e a "empurra" para o seu sistema.
+> [!IMPORTANT]
+> Certifique-se de salvar estas configurações. Após salvar, o Meta fará uma verificação automática no seu backend.
 
-**Passos na Meta:**
-1. Vá em **WhatsApp > Configuração de Webhook**.
-2. Cole a URL do seu serviço (ex: `https://seu-app.easypanel.host/webhook`).
-3. Em **Webhook Fields**, marque a opção `messages`.
+## 3. Selecionando Campos (Subscriptions)
+Abaixo da URL que você acabou de configurar, clique em **Gerenciar**:
+1. Procure pelo campo `messages`.
+2. Clique em **Assinar (Subscribe)**.
+3. Se desejar saber quando uma mensagem foi lida ou entregue, assine também o campo `message_status`.
 
----
-
-### Opção 2: Integração com Plataformas No-Code (n8n / Make)
-Se você usa **n8n** ou **Make.com**, você pode:
-1. Receber o Webhook da Meta neles.
-2. Salvar em um Banco de Dados ou enviar direto para uma API que este sistema possa ler.
-
----
-
-### Estrutura que o sistema espera
-Para que as mensagens apareçam na aba, elas devem ser salvas no `localStorage` sob a chave `ambev_received_messages` no seguinte formato:
-
-```json
-[
-  {
-    "from": "5511999999999",
-    "text": "Mensagem do cliente",
-    "timestamp": "12/01/2026 18:30:00"
-  }
-]
-```
+## 4. Obtendo o Token de Acesso Permanente
+Para enviar respostas pela aba Recebidas, o sistema precisa de um Token de Acesso do Sistema:
+1. Vá em **Configurações do Negócio** (Business Settings).
+2. Em **Usuários do Sistema**, crie um usuário ou selecione um existente.
+3. Clique em **Gerar Novo Token**.
+4. Selecione o App correto e marque as permissões:
+   - `whatsapp_business_messaging`
+   - `whatsapp_business_management`
+5. Copie e cole este token na aba **Configurações** do seu sistema.
 
 ---
 
-### Como testar agora?
-Eu adicionei **mensagens de exemplo** para você visualizar como a interface se comporta. Basta clicar na aba **Recebidas** no menu lateral. 
+## Como o backend processa isso?
+Agora o sistema possui um endpoint real no `server.js` que:
+1. Valida a conexão com a Meta.
+2. Recebe a mensagem JSON.
+3. Extrai o nome, número e texto.
+4. Salva no banco de dados local (`database.sqlite`).
+5. Notifica o frontend (que atualiza a aba automaticamente).
 
-Você também verá um botão **"Ligar para Cliente"** que abre automaticamente o discador do seu celular ou computador com o número dele! 📞
+---
+
+### Testando a conexão
+Após configurar no Meta, envie um "Olá" para o número do WhatsApp Business. Em poucos segundos, a mensagem deve aparecer na aba **Recebidas** do seu dashboard.

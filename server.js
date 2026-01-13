@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const WEBHOOK_VERIFY_TOKEN = 'ambev_webhook_token_2026'; // Should match meta dashboard
 
 // Initialize DB on start
 initializeDB();
@@ -233,6 +234,87 @@ const processCampaign = async () => {
     console.log(`[JOB] Completed!`);
 };
 
+// --- INDIVIDUAL MESSAGE SENDER ---
+const sendSingleMessage = async (phone, text, config) => {
+    try {
+        const url = `https://graph.facebook.com/v21.0/${config.phoneId}/messages`;
+        const payload = {
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: phone,
+            type: "text",
+            text: { body: text }
+        };
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${config.token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error?.message || 'Erro ao enviar mensagem individual');
+        }
+        return { success: true, data };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+};
+
+// --- WEBHOOK ENDPOINTS ---
+
+// GET: Verification for Meta
+app.get('/webhook', (req, res) => {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+
+    if (mode && token) {
+        if (mode === 'subscribe' && token === WEBHOOK_VERIFY_TOKEN) {
+            console.log('[WEBHOOK] Verified by Meta');
+            res.status(200).send(challenge);
+        } else {
+            res.sendStatus(403);
+        }
+    }
+});
+
+// POST: Receive messages from Meta
+app.post('/webhook', async (req, res) => {
+    try {
+        const body = req.body;
+
+        if (body.object === 'whatsapp_business_account') {
+            if (body.entry && body.entry[0].changes && body.entry[0].changes[0].value.messages) {
+                const message = body.entry[0].changes[0].value.messages[0];
+                const contact = body.entry[0].changes[0].value.contacts[0];
+
+                const from = message.from; // Phone number
+                const name = contact.profile.name || 'Cliente';
+                const text = message.text ? message.text.body : '[Mensagem de mídia/outro tipo]';
+
+                console.log(`[WEBHOOK] Nova mensagem de ${name} (${from}): ${text}`);
+
+                const db = await getDB();
+                await db.run(
+                    'INSERT INTO received_messages (contact_phone, contact_name, message_body, is_from_me) VALUES (?, ?, ?, ?)',
+                    from, name, text, 0
+                );
+            }
+            res.sendStatus(200);
+        } else {
+            res.sendStatus(404);
+        }
+    } catch (err) {
+        console.error('[WEBHOOK ERROR]', err);
+        res.sendStatus(500);
+    }
+});
+
 // --- API ROUTES FOR JOB ---
 
 app.get('/api/status', (req, res) => {
@@ -287,6 +369,38 @@ app.post('/api/control', (req, res) => {
     }
 
     res.json({ success: true, status: activeJob.status });
+});
+
+app.post('/api/send-message', async (req, res) => {
+    try {
+        const { phone, text, email } = req.body;
+        const db = await getDB();
+
+        // Find user config
+        const user = await db.get('SELECT id FROM users WHERE email = ?', email);
+        if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
+
+        const config = await db.get('SELECT * FROM user_config WHERE user_id = ?', user.id);
+        if (!config || !config.token || !config.phoneId) {
+            return res.status(400).json({ error: 'Configuração da Meta incompleta' });
+        }
+
+        const result = await sendSingleMessage(phone, text, config);
+
+        if (result.success) {
+            // Log in received_messages as from_me = 1
+            await db.run(
+                'INSERT INTO received_messages (contact_phone, contact_name, message_body, is_from_me) VALUES (?, ?, ?, ?)',
+                phone, 'Eu', text, 1
+            );
+            res.json({ success: true });
+        } else {
+            res.status(500).json({ error: result.error });
+        }
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Falha ao enviar mensagem' });
+    }
 });
 
 // Serve React Static Files (Production)
