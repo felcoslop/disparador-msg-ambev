@@ -32,6 +32,6 @@ COPY --from=build /app/dist ./dist
 COPY server.js .
 COPY database.js .
 
-EXPOSE 80
+EXPOSE 3000
 
 CMD ["node", "server.js"]
