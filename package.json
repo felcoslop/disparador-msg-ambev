@@ -8,10 +8,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "node server.js",
+    "start": "npx prisma generate && npx prisma db push && node server.js",
     "server": "node server.js",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate": "npx prisma db push",
     "prisma:studio": "prisma studio"
   },
   "dependencies": {

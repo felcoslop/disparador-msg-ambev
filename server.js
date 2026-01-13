@@ -810,10 +810,10 @@ app.use((req, res) => {
 });
 
 // --- START SERVER ---
-const FINAL_PORT = 3000;
+const FINAL_PORT = process.env.PORT || 3000;
 server.listen(FINAL_PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server running on http://localhost:${FINAL_PORT}`);
-    console.log(`📡 WebSocket ready on ws://localhost:${FINAL_PORT}`);
+    console.log(`🚀 Server running on port ${FINAL_PORT}`);
+    console.log(`📡 WebSocket ready on port ${FINAL_PORT}`);
 });
 
 
