@@ -12,7 +12,6 @@
     "server": "node server.js",
     "prisma:generate": "npx prisma generate",
     "prisma:migrate": "npx prisma db push",
-    "postinstall": "npx prisma generate",
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
