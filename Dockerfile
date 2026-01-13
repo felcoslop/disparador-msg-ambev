@@ -32,6 +32,15 @@ COPY --from=build /app/dist ./dist
 COPY server.js .
 COPY database.js .
 
+# Create data directory for persistent database
+RUN mkdir -p /data
+
+# Set production environment
+ENV NODE_ENV=production
+
+# Declare volume for database persistence
+VOLUME ["/data"]
+
 EXPOSE 3000
 
 CMD ["node", "server.js"]

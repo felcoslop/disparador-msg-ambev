@@ -6,7 +6,9 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DB_PATH = path.join(__dirname, 'database.sqlite');
+// Use /data for Docker persistence, or local directory for development
+const DB_DIR = process.env.NODE_ENV === 'production' ? '/data' : __dirname;
+const DB_PATH = path.join(DB_DIR, 'database.sqlite');
 
 let db;
 
@@ -77,13 +79,7 @@ export async function initializeDB() {
         );
     `);
 
-    // Seed Default User if empty
-    const admin = await db.get('SELECT * FROM users WHERE email = ?', '99847120@ab-inbev.com');
-    if (!admin) {
-        await db.run('INSERT INTO users (email, password) VALUES (?, ?)', '99847120@ab-inbev.com', 'admin');
-    }
-
-    console.log('[DB] SQLite Initialized');
+    console.log('[DB] SQLite Initialized at:', DB_PATH);
     return db;
 }
 
