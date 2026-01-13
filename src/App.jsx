@@ -65,6 +65,13 @@ export default function App() {
     const [errors, setErrors] = useState([]);
     const [showToken, setShowToken] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    const [toasts, setToasts] = useState([]);
+
+    const addToast = (message, type = 'info') => {
+        const id = Date.now();
+        setToasts(prev => [...prev, { id, message, type }]);
+        setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
+    };
 
     // --- API SYNC + HYBRID BACKUP ---
     const fetchDb = async () => {
@@ -142,19 +149,6 @@ export default function App() {
         return () => clearInterval(interval);
     }, [user?.email]);
 
-    const resetApp = async () => {
-        if (window.confirm("Isso apagará todas as configurações e histórico do servidor. Continuar?")) {
-            // Reset to defaults
-            const defaultData = {
-                users: [],
-                history: [],
-                config: { token: '', phoneId: '', wabaId: '' },
-                receivedMessages: []
-            };
-            await saveDb(defaultData);
-            window.location.reload();
-        }
-    };
 
     const handleLogin = (email, password) => {
         // Simple standardization
@@ -167,8 +161,9 @@ export default function App() {
         if (userInDb && userInDb.password.trim() === cleanPass) {
             setUser(userInDb);
             setView('dashboard');
+            addToast(`Bem-vindo, ${userInDb.email}!`, 'success');
         } else {
-            alert('E-mail ou senha incorretos.');
+            addToast('E-mail ou senha incorretos.', 'error');
         }
     };
 
@@ -194,10 +189,10 @@ export default function App() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: cleanEmail, password: cleanPass })
             });
-            window.alert('Usuário cadastrado com sucesso!');
+            addToast('Usuário cadastrado com sucesso!', 'success');
             setView('login');
         } catch (e) {
-            window.alert('Erro ao realizar cadastro. Tente novamente.');
+            addToast('Erro ao realizar cadastro. Tente novamente.', 'error');
         }
     };
 
@@ -244,43 +239,47 @@ export default function App() {
     }
 
     return (
-        <Dashboard
-            user={user}
-            onLogout={() => setUser(null)}
-            config={config}
-            setConfig={setConfig}
-            history={history}
-            setHistory={setHistory}
-            receivedMessages={receivedMessages}
-            setReceivedMessages={setReceivedMessages}
-            saveDb={saveDb}
-            campaignData={campaignData}
-            setCampaignData={setCampaignData}
-            headers={headers}
-            setHeaders={setHeaders}
-            mapping={mapping}
-            setMapping={setMapping}
-            templateName={templateName}
-            setTemplateName={setTemplateName}
-            templatePreview={templatePreview}
-            setTemplatePreview={setTemplatePreview}
-            dates={dates}
-            setDates={setDates}
-            sendingStatus={sendingStatus}
-            setSendingStatus={setSendingStatus}
-            activeTab={activeTab}
-            setActiveTab={setActiveTab}
-            activeContact={activeContact}
-            setActiveContact={setActiveContact}
-            progress={progress}
-            setProgress={setProgress}
-            logs={logs}
-            setLogs={setLogs}
-            errors={errors}
-            setErrors={setErrors}
-            showToken={showToken}
-            setShowToken={setShowToken}
-        />
+        <>
+            <Dashboard
+                user={user}
+                onLogout={() => setUser(null)}
+                config={config}
+                setConfig={setConfig}
+                history={history}
+                setHistory={setHistory}
+                receivedMessages={receivedMessages}
+                setReceivedMessages={setReceivedMessages}
+                saveDb={saveDb}
+                campaignData={campaignData}
+                setCampaignData={setCampaignData}
+                headers={headers}
+                setHeaders={setHeaders}
+                mapping={mapping}
+                setMapping={setMapping}
+                templateName={templateName}
+                setTemplateName={setTemplateName}
+                templatePreview={templatePreview}
+                setTemplatePreview={setTemplatePreview}
+                dates={dates}
+                setDates={setDates}
+                sendingStatus={sendingStatus}
+                setSendingStatus={setSendingStatus}
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                activeContact={activeContact}
+                setActiveContact={setActiveContact}
+                progress={progress}
+                setProgress={setProgress}
+                logs={logs}
+                setLogs={setLogs}
+                errors={errors}
+                setErrors={setErrors}
+                showToken={showToken}
+                setShowToken={setShowToken}
+                addToast={addToast}
+            />
+            <Toast toasts={toasts} />
+        </>
     );
 }
 
@@ -630,11 +629,11 @@ function Dashboard({
 
     const startSending = async () => {
         if (!config.token || !config.phoneId) {
-            alert('Configure as credenciais do Meta na aba Ajustes primeiro.');
+            addToast('Configure as credenciais do Meta na aba Ajustes primeiro.', 'error');
             return;
         }
         if (!templateName) {
-            alert('Por favor, informe o Nome do Modelo (template) configurado na Meta.');
+            addToast('Por favor, informe o Nome do Modelo (template) configurado na Meta.', 'error');
             return;
         }
 
@@ -678,11 +677,11 @@ function Dashboard({
 
             if (!res.ok) {
                 const err = await res.json();
-                alert('Erro ao iniciar campanha: ' + err.error);
+                addToast('Erro ao iniciar campanha: ' + err.error, 'error');
                 setSendingStatus('idle');
             }
         } catch (e) {
-            alert('Erro de conexão com o servidor.');
+            addToast('Erro de conexão com o servidor.', 'error');
             setSendingStatus('idle');
         }
     };
@@ -1035,8 +1034,8 @@ function Dashboard({
                                     </button>
                                 </div>
                             </div>
-                            <div className="input-row">
-                                <div className="input-group">
+                            <div className="input-row" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                                <div className="input-group" style={{ flex: '1 1 200px' }}>
                                     <label>PHONE_NUMBER_ID</label>
                                     <input
                                         type="text"
@@ -1049,7 +1048,7 @@ function Dashboard({
                                         style={{ opacity: isEditing ? 1 : 0.7 }}
                                     />
                                 </div>
-                                <div className="input-group">
+                                <div className="input-group" style={{ flex: '1 1 200px' }}>
                                     <label>BUSINESS_ACCOUNT_ID</label>
                                     <input
                                         type="text"
@@ -1090,7 +1089,7 @@ function Dashboard({
                                             });
                                             // await saveDb({ config: tempConfig }); // Legacy removed
                                             setIsEditing(false);
-                                            alert('Configurações salvas e sincronizadas!');
+                                            addToast('Configurações salvas e sincronizadas!', 'success');
                                         }}
                                     >
                                         Salvar Configurações
