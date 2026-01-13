@@ -283,6 +283,51 @@ export default function App() {
     );
 }
 
+// --- Toast Component ---
+function Toast({ toasts }) {
+    if (!toasts.length) return null;
+
+    return (
+        <div style={{
+            position: 'fixed',
+            top: '20px',
+            right: '20px',
+            zIndex: 9999,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px'
+        }}>
+            {toasts.map(toast => (
+                <div key={toast.id} style={{
+                    minWidth: '280px',
+                    padding: '16px',
+                    borderRadius: '8px',
+                    backgroundColor: toast.type === 'error' ? '#dc3545' :
+                        toast.type === 'success' ? '#00a276' :
+                            '#280091',
+                    color: '#fff',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    animation: 'slideIn 0.3s ease-out'
+                }}>
+                    {toast.type === 'error' ? <AlertCircle size={20} /> :
+                        toast.type === 'success' ? <CheckCircle2 size={20} /> :
+                            <AlertCircle size={20} />}
+                    <span style={{ fontSize: '14px', fontWeight: 500 }}>{toast.message}</span>
+                </div>
+            ))}
+            <style>{`
+                @keyframes slideIn {
+                    from { transform: translateX(100%); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
+                }
+            `}</style>
+        </div>
+    );
+}
+
 // --- Views ---
 
 function LoginView({ onLogin, onSwitch, onResetApp }) {
