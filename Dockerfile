@@ -3,33 +3,37 @@ FROM node:20 AS build
 
 WORKDIR /app
 
-# Ensure we have a clean environment
-RUN npm config set fund false
-RUN npm config set audit false
-
 # Copy package files
 COPY package.json ./
-# If package-lock.json exists, copy it, else it will be skipped
 COPY package-lock.json* ./
 
-# Install dependencies with legacy-peer-deps to avoid conflicts
+# Install dependencies
 RUN npm install --legacy-peer-deps
 
-# Copy source code
+# Copy source code and build React app
 COPY . .
-
-# Build the application
 RUN npm run build
 
 # Production stage
-FROM nginx:alpine
+FROM node:20-slim
 
-# Copy built files from the build stage
-COPY --from=build /app/dist /usr/share/nginx/html
+WORKDIR /app
 
-# Copy nginx configuration
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Copy only production dependencies (optional but cleaner)
+COPY package.json ./
+COPY package-lock.json* ./
+RUN npm install --production --legacy-peer-deps
 
-EXPOSE 80
+# Copy built frontend from build stage
+COPY --from=build /app/dist ./dist
 
-CMD ["nginx", "-g", "daemon off;"]
+# Copy backend files and database logic
+COPY server.js .
+COPY database.js .
+
+# Create an empty database if it doesn't exist (it will be initialized by server.js anyway)
+# RUN touch database.sqlite
+
+EXPOSE 3000
+
+CMD ["node", "server.js"]
