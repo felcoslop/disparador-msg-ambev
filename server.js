@@ -13,10 +13,16 @@ const PORT = process.env.PORT || 3000;
 const WEBHOOK_VERIFY_TOKEN = 'ambev_webhook_token_2026'; // Should match meta dashboard
 
 // Initialize DB on start
-initializeDB();
+initializeDB().then(() => {
+    console.log('[DB] Database ready');
+}).catch(err => {
+    console.error('[DB ERROR] Failed to initialize:', err);
+});
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // Support large payloads (images/base64)
+
+app.get('/health', (req, res) => res.send('OK'));
 
 // Aggregate GET for initial load
 app.get('/api/db', async (req, res) => {
