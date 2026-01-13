@@ -75,7 +75,9 @@ app.post('/api/register', async (req, res) => {
 
 app.post('/api/config', async (req, res) => {
     try {
-        const { email, token, phoneId, wabaId, templateName, mapping } = req.body; // Expect email to link config
+        const { email, token, phoneId, wabaId, templateName, mapping } = req.body;
+        console.log(`[API] Saving config for ${email}:`, { token: '***', phoneId, wabaId, templateName, mapping });
+
         const db = await getDB();
         const user = await db.get('SELECT id FROM users WHERE email = ?', email);
 
@@ -83,11 +85,16 @@ app.post('/api/config', async (req, res) => {
 
         await db.run(`INSERT OR REPLACE INTO user_config (user_id, token, phoneId, wabaId, templateName, mapping) 
                       VALUES (?, ?, ?, ?, ?, ?)`,
-            user.id, token, phoneId, wabaId, templateName, JSON.stringify(mapping));
+            user.id,
+            token || '',
+            phoneId || '',
+            wabaId || '',
+            templateName || '',
+            JSON.stringify(mapping || {}));
 
         res.json({ success: true });
     } catch (err) {
-        console.error(err);
+        console.error('[API ERROR] Failed to save config:', err);
         res.status(500).json({ error: 'Failed to save config' });
     }
 });
@@ -97,6 +104,7 @@ app.post('/api/config', async (req, res) => {
 app.post('/api/db', async (req, res) => {
     try {
         const { users, config, history, email } = req.body;
+        console.log(`[API] Bulk sync for ${email}`, { config: !!config, history: !!history });
         const db = await getDB();
 
         // Transactional update attempt

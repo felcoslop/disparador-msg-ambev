@@ -43,12 +43,8 @@ export default function App() {
 
     // State - Initialized as empty, populated ONLY by API (Server synchronization)
     const [users, setUsers] = useState([DEFAULT_USER]);
-    const [config, setConfig] = useState(() => {
-        try { return JSON.parse(localStorage.getItem('ambev_config_backup')) || { token: '', phoneId: '', wabaId: '' }; } catch { return { token: '', phoneId: '', wabaId: '' }; }
-    });
-    const [history, setHistory] = useState(() => {
-        try { return JSON.parse(localStorage.getItem('ambev_history_backup')) || []; } catch { return []; }
-    });
+    const [config, setConfig] = useState({ token: '', phoneId: '', wabaId: '' });
+    const [history, setHistory] = useState([]);
     const [receivedMessages, setReceivedMessages] = useState([]);
 
     // UI State (not persisted)
@@ -81,28 +77,21 @@ export default function App() {
             if (res.ok) {
                 const data = await res.json();
 
-                // Server is master. Update state AND backup.
+                // Server is master. Update state.
                 if (data.users && data.users.length) {
                     setUsers(data.users);
-                    localStorage.setItem('ambev_users_backup', JSON.stringify(data.users));
                 }
 
                 // Only update config if we got one (meaning we are logged in or server sent default)
                 if (data.config) {
                     setConfig(data.config);
-                    localStorage.setItem('ambev_config_backup', JSON.stringify(data.config));
 
-                    if (data.config.templateName) {
-                        setTemplateName(data.config.templateName);
-                    }
-                    if (data.config.mapping) {
-                        setMapping(data.config.mapping);
-                    }
+                    setTemplateName(data.config.templateName || '');
+                    setMapping(data.config.mapping || {});
                 }
 
                 if (data.history) {
                     setHistory(data.history);
-                    localStorage.setItem('ambev_history_backup', JSON.stringify(data.history));
                 }
                 setReceivedMessages(data.receivedMessages || []);
                 return data;
@@ -116,11 +105,6 @@ export default function App() {
     };
 
     const saveDb = async (newData) => {
-        // 1. SAVE LOCAL BACKUP IMMEDIATELY (Safe)
-        if (newData.users) localStorage.setItem('ambev_users_backup', JSON.stringify(newData.users));
-        if (newData.config) localStorage.setItem('ambev_config_backup', JSON.stringify(newData.config));
-        if (newData.history) localStorage.setItem('ambev_history_backup', JSON.stringify(newData.history));
-
         // 2. TRY SERVER SYNC
         try {
             const currentData = {
