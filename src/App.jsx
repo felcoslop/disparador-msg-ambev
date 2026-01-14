@@ -588,6 +588,7 @@ function Dashboard({
     const [tempConfig, setTempConfig] = useState(config);
     const [selectedLogDispatch, setSelectedLogDispatch] = useState(null);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [showProfileModal, setShowProfileModal] = useState(null); // Will store { name, phone }
 
     const refreshMessages = async () => {
         setIsRefreshing(true);
@@ -877,7 +878,7 @@ function Dashboard({
                 {activeTab === 'recebidas' && (
                     <div className="card ambev-flag fade-in">
                         <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                            <h2 style={{ margin: 0 }}>Mensagens Recebidas</h2>
+
                             <button
                                 className={`refresh-btn ${isRefreshing ? 'spinning' : ''}`}
                                 onClick={refreshMessages}
@@ -920,7 +921,7 @@ function Dashboard({
                                                 }}
                                             >
                                                 <div className="contact-header">
-                                                    <div style={{ fontWeight: 600 }}>{contactName}</div>
+                                                    <div className="contact-name">{contactName}</div>
                                                     {hasUnread && <span className="unread-dot"></span>}
                                                 </div>
                                             </div>
@@ -933,9 +934,23 @@ function Dashboard({
                             <div className="card ambev-flag chat-view" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0' }}>
                                 {activeContact ? (
                                     <>
-                                        <header style={{ padding: '1rem', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                            <div style={{ fontWeight: 700 }}>{receivedMessages.find(m => m.contactPhone === activeContact)?.contactName || activeContact}</div>
-                                            <div style={{ fontSize: '0.8rem', color: '#666' }}>{activeContact}</div>
+                                        <header style={{ padding: '1rem', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center' }}>
+                                            <div
+                                                className="profile-avatar"
+                                                onClick={() => setShowProfileModal({
+                                                    name: receivedMessages.find(m => m.contactPhone === activeContact)?.contactName || activeContact,
+                                                    phone: activeContact
+                                                })}
+                                            >
+                                                <img
+                                                    src={`https://ui-avatars.com/api/?name=${encodeURIComponent(receivedMessages.find(m => m.contactPhone === activeContact)?.contactName || activeContact)}&background=280091&color=fff`}
+                                                    alt="Avatar"
+                                                />
+                                            </div>
+                                            <div style={{ flex: 1 }}>
+                                                <div style={{ fontWeight: 700 }}>{receivedMessages.find(m => m.contactPhone === activeContact)?.contactName || activeContact}</div>
+                                                <div style={{ fontSize: '0.8rem', color: '#666' }}>{activeContact}</div>
+                                            </div>
                                         </header>
                                         <div className="chat-messages" style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column-reverse' }}>
                                             {receivedMessages.filter(m => m.contactPhone === activeContact).map(msg => (
@@ -1081,6 +1096,21 @@ function Dashboard({
             {
                 selectedLogDispatch && (
                     <LogModal dispatch={selectedLogDispatch} onClose={() => setSelectedLogDispatch(null)} />
+                )
+            }
+            {
+                showProfileModal && (
+                    <div className="profile-modal-overlay" onClick={() => setShowProfileModal(null)}>
+                        <div className="profile-modal-content" onClick={e => e.stopPropagation()}>
+                            <button className="profile-modal-close" onClick={() => setShowProfileModal(null)}>
+                                <X size={20} />
+                            </button>
+                            <img
+                                src={`https://ui-avatars.com/api/?name=${encodeURIComponent(showProfileModal.name)}&background=280091&color=fff&size=500`}
+                                alt="Profile"
+                            />
+                        </div>
+                    </div>
                 )
             }
         </div >
