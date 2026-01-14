@@ -152,7 +152,7 @@ function AppContent() {
         } else if (event === 'message:received') {
             fetchMessages();
         }
-    }, [addToast]);
+    }, [addToast, fetchMessages, fetchDispatches]);
 
     // Connect WebSocket
     useWebSocket(user?.id, handleWsMessage);
@@ -363,6 +363,8 @@ function AppContent() {
         dates,
         setDates,
         setActiveTab: (tab) => navigate(`/${tab === 'disparos' ? 'home' : tab === 'historico' ? 'history' : tab === 'recebidas' ? 'received' : 'settings'}`),
+        isRefreshing,
+        fetchMessages,
         activeContact,
         setActiveContact,
         showToken,
@@ -609,30 +611,15 @@ function Dashboard({
     showToken,
     setShowToken,
     addToast,
-    setReceivedMessages
+    setReceivedMessages,
+    isRefreshing,
+    fetchMessages
 }) {
     const [isEditing, setIsEditing] = useState(false);
     const [tempConfig, setTempConfig] = useState(config);
     const [selectedLogDispatch, setSelectedLogDispatch] = useState(null);
-    const [isRefreshing, setIsRefreshing] = useState(false);
     const [showProfileModal, setShowProfileModal] = useState(null); // Will store { name, phone }
 
-    const refreshMessages = async () => {
-        setIsRefreshing(true);
-        try {
-            const res = await fetch('/api/messages');
-            if (res.ok) {
-                const data = await res.json();
-                setReceivedMessages(data);
-                addToast('Mensagens atualizadas!', 'success');
-            }
-        } catch (err) {
-            console.error('Refresh error:', err);
-            addToast('Erro ao atualizar mensagens', 'error');
-        } finally {
-            setIsRefreshing(false);
-        }
-    };
 
     const handleFileUpload = (e) => {
         const file = e.target.files[0];
