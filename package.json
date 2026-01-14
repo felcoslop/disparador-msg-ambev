@@ -8,13 +8,14 @@
     "dev": "vite",
     "build": "npx prisma generate && vite build",
     "preview": "vite preview",
-    "start": "npx prisma generate && npx prisma db push --accept-data-loss && node server.js",
+    "start": "./node_modules/.bin/prisma generate && ./node_modules/.bin/prisma db push --accept-data-loss && node server.js",
     "server": "node server.js",
     "prisma:generate": "npx prisma generate",
     "prisma:migrate": "npx prisma db push",
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
+    "prisma": "^6.0.0",
     "@prisma/client": "^6.0.0",
     "body-parser": "^2.2.2",
     "cors": "^2.8.5",
@@ -30,7 +31,6 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.1.2",
-    "prisma": "^6.0.0",
     "vite": "^7.3.1"
   }
 }

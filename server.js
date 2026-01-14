@@ -1,3 +1,4 @@
+console.log('[STARTUP] Starting server process...');
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
