@@ -130,33 +130,6 @@ function AppContent() {
         setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
     }, []);
 
-    // WebSocket message handler
-    const handleWsMessage = useCallback((data) => {
-        const { event, data: payload } = data;
-
-        if (event === 'dispatch:progress') {
-            setActiveDispatch(prev => (prev && prev.id === payload.dispatchId) ? {
-                ...prev,
-                currentIndex: payload.currentIndex,
-                successCount: payload.successCount,
-                errorCount: payload.errorCount,
-                lastLog: payload.lastLog
-            } : prev);
-        } else if (event === 'dispatch:status') {
-            setActiveDispatch(prev => (prev && prev.id === payload.dispatchId) ? { ...prev, status: payload.status } : prev);
-            if (payload.status === 'completed') {
-                addToast('Disparo concluído!', 'success');
-            }
-        } else if (event === 'dispatch:complete') {
-            fetchDispatches();
-        } else if (event === 'message:received') {
-            fetchMessages();
-        }
-    }, [addToast, fetchMessages, fetchDispatches]);
-
-    // Connect WebSocket
-    useWebSocket(user?.id, handleWsMessage);
-
     // Fetch functions
     const fetchUserData = useCallback(async () => {
         if (!user?.id) return;
@@ -213,6 +186,34 @@ function AppContent() {
             setIsRefreshing(false);
         }
     }, []);
+
+    // WebSocket message handler
+    const handleWsMessage = useCallback((data) => {
+        const { event, data: payload } = data;
+
+        if (event === 'dispatch:progress') {
+            setActiveDispatch(prev => (prev && prev.id === payload.dispatchId) ? {
+                ...prev,
+                currentIndex: payload.currentIndex,
+                successCount: payload.successCount,
+                errorCount: payload.errorCount,
+                lastLog: payload.lastLog
+            } : prev);
+        } else if (event === 'dispatch:status') {
+            setActiveDispatch(prev => (prev && prev.id === payload.dispatchId) ? { ...prev, status: payload.status } : prev);
+            if (payload.status === 'completed') {
+                addToast('Disparo concluído!', 'success');
+            }
+        } else if (event === 'dispatch:complete') {
+            fetchDispatches();
+        } else if (event === 'message:received') {
+            fetchMessages();
+        }
+    }, [addToast, fetchMessages, fetchDispatches]);
+
+    // Connect WebSocket
+    useWebSocket(user?.id, handleWsMessage);
+
 
     // Load data on mount/login
     useEffect(() => {
