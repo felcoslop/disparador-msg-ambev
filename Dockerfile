@@ -39,6 +39,7 @@ RUN mkdir -p /data
 
 # Set production environment
 ENV NODE_ENV=production
+ENV DATABASE_URL=file:/data/database.sqlite
 
 # Declare volume for database persistence
 VOLUME ["/data"]

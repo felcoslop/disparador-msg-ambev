@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -782,8 +783,13 @@ app.post('/webhook', async (req, res) => {
                 });
 
                 // Broadcast to all connected clients
-                clients.forEach((sockets, userId) => {
-                    broadcast(userId, 'message:received', { from, name, text });
+                wss.clients.forEach((client) => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(JSON.stringify({
+                            event: 'message:received',
+                            data: { from, name, text }
+                        }));
+                    }
                 });
             }
             res.sendStatus(200);

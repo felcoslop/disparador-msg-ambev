@@ -877,17 +877,8 @@ function Dashboard({
 
                 {activeTab === 'recebidas' && (
                     <div className="card ambev-flag fade-in">
-                        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-
-                            <button
-                                className={`refresh-btn ${isRefreshing ? 'spinning' : ''}`}
-                                onClick={refreshMessages}
-                                title="Atualizar mensagens"
-                                disabled={isRefreshing}
-                                style={{ padding: '8px', border: 'none', background: 'none', cursor: 'pointer' }}
-                            >
-                                <RefreshCw size={20} />
-                            </button>
+                        <div className="card-header" style={{ marginBottom: '1rem' }}>
+                            {/* Refresh button moved to Chat Header */}
                         </div>
                         <div className="received-container" style={{ display: 'flex', gap: '20px', height: 'calc(100vh - 280px)' }}>
                             <div className="card ambev-flag" style={{ width: '300px', flexShrink: 0, display: 'flex', flexDirection: 'column', padding: '1rem' }}>
@@ -936,28 +927,39 @@ function Dashboard({
                             <div className="card ambev-flag chat-view" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0' }}>
                                 {activeContact ? (
                                     <>
-                                        <header style={{ padding: '1rem', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center' }}>
-                                            <div
-                                                className="profile-avatar"
-                                                onClick={() => {
-                                                    const contactMsgs = receivedMessages.filter(m => m.contactPhone === activeContact);
-                                                    const clientNameMsg = contactMsgs.find(m => !m.isFromMe);
-                                                    const clientName = clientNameMsg ? clientNameMsg.contactName : activeContact;
-                                                    setShowProfileModal({
-                                                        name: clientName,
-                                                        phone: activeContact
-                                                    });
-                                                }}
+                                        <header style={{ padding: '1rem', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                                <div
+                                                    className="profile-avatar"
+                                                    onClick={() => {
+                                                        const contactMsgs = receivedMessages.filter(m => m.contactPhone === activeContact);
+                                                        const clientNameMsg = contactMsgs.find(m => !m.isFromMe);
+                                                        const clientName = clientNameMsg ? clientNameMsg.contactName : activeContact;
+                                                        setShowProfileModal({
+                                                            name: clientName,
+                                                            phone: activeContact
+                                                        });
+                                                    }}
+                                                >
+                                                    <img
+                                                        src={`/api/contacts/${activeContact}/photo?name=${encodeURIComponent(receivedMessages.filter(m => m.contactPhone === activeContact).find(m => !m.isFromMe)?.contactName || activeContact)}`}
+                                                        alt="Avatar"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <div style={{ fontWeight: 700 }}>{receivedMessages.filter(m => m.contactPhone === activeContact).find(m => !m.isFromMe)?.contactName || activeContact}</div>
+                                                    <div style={{ fontSize: '0.8rem', color: '#666' }}>{activeContact}</div>
+                                                </div>
+                                            </div>
+                                            <button
+                                                className={`refresh-btn ${isRefreshing ? 'spinning' : ''}`}
+                                                onClick={refreshMessages}
+                                                title="Atualizar mensagens"
+                                                disabled={isRefreshing}
+                                                style={{ padding: '8px', border: '1px solid #eee', borderRadius: '4px', background: '#f9f9f9', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                                             >
-                                                <img
-                                                    src={`/api/contacts/${activeContact}/photo?name=${encodeURIComponent(receivedMessages.filter(m => m.contactPhone === activeContact).find(m => !m.isFromMe)?.contactName || activeContact)}`}
-                                                    alt="Avatar"
-                                                />
-                                            </div>
-                                            <div style={{ flex: 1 }}>
-                                                <div style={{ fontWeight: 700 }}>{receivedMessages.filter(m => m.contactPhone === activeContact).find(m => !m.isFromMe)?.contactName || activeContact}</div>
-                                                <div style={{ fontSize: '0.8rem', color: '#666' }}>{activeContact}</div>
-                                            </div>
+                                                <RefreshCw size={18} />
+                                            </button>
                                         </header>
                                         <div className="chat-messages" style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column-reverse' }}>
                                             {receivedMessages.filter(m => m.contactPhone === activeContact).map(msg => (
