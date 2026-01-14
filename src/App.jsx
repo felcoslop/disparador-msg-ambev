@@ -910,47 +910,74 @@ function Dashboard({
                                     </button>
                                 </div>
                                 <div className="contact-list" style={{ flex: 1, overflowY: 'auto', marginTop: '1rem' }}>
-                                    {Array.from(new Set(receivedMessages.map(m => m.contactPhone))).map(phone => {
-                                        const contactMsgs = receivedMessages.filter(m => m.contactPhone === phone);
-                                        const clientNameMsg = contactMsgs.find(m => !m.isFromMe);
-                                        const contactName = clientNameMsg ? clientNameMsg.contactName : phone;
-                                        const hasUnread = contactMsgs.some(m => !m.isFromMe && !m.isRead);
-                                        const isSelected = activeContact === phone;
-                                        return (
-                                            <div
-                                                key={phone}
-                                                className={`contact-item ${isSelected ? 'active' : ''}`}
-                                                onClick={() => {
-                                                    setActiveContact(phone);
-                                                    // Instant UI update: mark local messages as read
-                                                    setReceivedMessages(prev => prev.map(m =>
-                                                        (m.contactPhone === phone && !m.isFromMe) ? { ...m, isRead: true } : m
-                                                    ));
+                                    {/* Deduction of unique contacts with normalization */}
+                                    {(() => {
+                                        // Helper to normalize phone for grouping
+                                        const normalize = p => String(p).replace(/\D/g, '');
 
-                                                    fetch('/api/messages/mark-read', {
-                                                        method: 'POST',
-                                                        headers: { 'Content-Type': 'application/json' },
-                                                        body: JSON.stringify({ phone })
-                                                    }).catch(err => console.error('Failed to mark as read:', err));
-                                                }}
-                                                style={{
-                                                    padding: '12px',
-                                                    borderRadius: '8px',
-                                                    cursor: 'pointer',
-                                                    marginBottom: '8px',
-                                                    border: isSelected ? '2px solid var(--ambev-blue)' : '1px solid #eee',
-                                                    backgroundColor: isSelected ? '#f0f4ff' : 'white',
-                                                    width: '100%',
-                                                    boxSizing: 'border-box'
-                                                }}
-                                            >
-                                                <div className="contact-header">
-                                                    <div className="contact-name">{contactName}</div>
-                                                    {hasUnread && <span className="unread-dot"></span>}
+                                        // Group messages by normalized phone
+                                        const groups = {};
+                                        receivedMessages.forEach(m => {
+                                            const key = normalize(m.contactPhone);
+                                            if (!groups[key]) groups[key] = [];
+                                            groups[key].push(m);
+                                        });
+
+                                        return Object.keys(groups).map(phoneKey => {
+                                            const contactMsgs = groups[phoneKey];
+                                            // Prefer the non-normalized phone from the first message for display/key usage if needed, 
+                                            // but for consistency let's use the key or the most common one. 
+                                            // Let's use the phone from the last message.
+                                            const displayPhone = contactMsgs[0].contactPhone;
+
+                                            // Find name: prefer from incoming message, else from outgoing
+                                            const incomingMsg = contactMsgs.find(m => !m.isFromMe);
+                                            const outgoingMsg = contactMsgs.find(m => m.isFromMe);
+
+                                            // If we have an incoming message, use its name. 
+                                            // If not, use the outgoing message's name (which comes from our DB logic).
+                                            // Fallback to phone number.
+                                            const contactName = incomingMsg ? incomingMsg.contactName : (outgoingMsg ? outgoingMsg.contactName : displayPhone);
+
+                                            const hasUnread = contactMsgs.some(m => !m.isFromMe && !m.isRead);
+                                            const isSelected = String(activeContact).replace(/\D/g, '') === phoneKey;
+
+                                            return (
+                                                <div
+                                                    key={phoneKey}
+                                                    className={`contact-item ${isSelected ? 'active' : ''}`}
+                                                    onClick={() => {
+                                                        setActiveContact(displayPhone);
+                                                        // Instant UI update
+                                                        setReceivedMessages(prev => prev.map(m =>
+                                                            (String(m.contactPhone).replace(/\D/g, '') === phoneKey && !m.isFromMe) ? { ...m, isRead: true } : m
+                                                        ));
+
+                                                        fetch('/api/messages/mark-read', {
+                                                            method: 'POST',
+                                                            headers: { 'Content-Type': 'application/json' },
+                                                            body: JSON.stringify({ phone: displayPhone })
+                                                        }).catch(err => console.error('Failed to mark as read:', err));
+                                                    }}
+                                                    style={{
+                                                        padding: '12px',
+                                                        borderRadius: '8px',
+                                                        cursor: 'pointer',
+                                                        marginBottom: '8px',
+                                                        border: isSelected ? '2px solid var(--ambev-blue)' : '1px solid #eee',
+                                                        backgroundColor: isSelected ? '#f0f4ff' : 'white',
+                                                        width: '100%',
+                                                        boxSizing: 'border-box'
+                                                    }}
+                                                >
+                                                    <div className="contact-header">
+                                                        <div className="contact-name">{contactName}</div>
+                                                        {hasUnread && <span className="unread-dot"></span>}
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        );
-                                    })}
+                                            );
+                                        });
+                                    })()}
                                     {receivedMessages.length === 0 && <p style={{ textAlign: 'center', color: '#999', marginTop: '2rem' }}>Nenhuma mensagem.</p>}
                                 </div>
                             </div>
@@ -962,9 +989,14 @@ function Dashboard({
                                             <div
                                                 className="profile-avatar"
                                                 onClick={() => {
-                                                    const contactMsgs = receivedMessages.filter(m => m.contactPhone === activeContact);
-                                                    const clientNameMsg = contactMsgs.find(m => !m.isFromMe);
-                                                    const clientName = clientNameMsg ? clientNameMsg.contactName : activeContact;
+                                                    const normalize = p => String(p).replace(/\D/g, '');
+                                                    const activeKey = normalize(activeContact);
+                                                    const contactMsgs = receivedMessages.filter(m => normalize(m.contactPhone) === activeKey);
+
+                                                    const incomingMsg = contactMsgs.find(m => !m.isFromMe);
+                                                    const outgoingMsg = contactMsgs.find(m => m.isFromMe);
+                                                    const clientName = incomingMsg ? incomingMsg.contactName : (outgoingMsg ? outgoingMsg.contactName : activeContact);
+
                                                     setShowProfileModal({
                                                         name: clientName,
                                                         phone: activeContact
@@ -972,34 +1004,58 @@ function Dashboard({
                                                 }}
                                             >
                                                 <img
-                                                    src={`/api/contacts/${activeContact}/photo?name=${encodeURIComponent(receivedMessages.filter(m => m.contactPhone === activeContact).find(m => !m.isFromMe)?.contactName || activeContact)}`}
+                                                    src={`/api/contacts/${activeContact}/photo?name=${encodeURIComponent(
+                                                        (() => {
+                                                            const normalize = p => String(p).replace(/\D/g, '');
+                                                            const activeKey = normalize(activeContact);
+                                                            const contactMsgs = receivedMessages.filter(m => normalize(m.contactPhone) === activeKey);
+                                                            const incomingMsg = contactMsgs.find(m => !m.isFromMe);
+                                                            const outgoingMsg = contactMsgs.find(m => m.isFromMe);
+                                                            return incomingMsg ? incomingMsg.contactName : (outgoingMsg ? outgoingMsg.contactName : activeContact);
+                                                        })()
+                                                    )}`}
                                                     alt="Avatar"
                                                 />
                                             </div>
                                             <div style={{ flex: 1 }}>
-                                                <div style={{ fontWeight: 700 }}>{receivedMessages.filter(m => m.contactPhone === activeContact).find(m => !m.isFromMe)?.contactName || activeContact}</div>
+                                                <div style={{ fontWeight: 700 }}>
+                                                    {(() => {
+                                                        const normalize = p => String(p).replace(/\D/g, '');
+                                                        const activeKey = normalize(activeContact);
+                                                        const contactMsgs = receivedMessages.filter(m => normalize(m.contactPhone) === activeKey);
+                                                        const incomingMsg = contactMsgs.find(m => !m.isFromMe);
+                                                        const outgoingMsg = contactMsgs.find(m => m.isFromMe);
+                                                        return incomingMsg ? incomingMsg.contactName : (outgoingMsg ? outgoingMsg.contactName : activeContact);
+                                                    })()}
+                                                </div>
                                                 <div style={{ fontSize: '0.8rem', color: '#666' }}>{activeContact}</div>
                                             </div>
                                         </header>
                                         <div className="chat-messages" style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column-reverse' }}>
-                                            {receivedMessages.filter(m => m.contactPhone === activeContact).map(msg => (
-                                                <div key={msg.id} style={{
-                                                    alignSelf: msg.isFromMe ? 'flex-end' : 'flex-start',
-                                                    backgroundColor: msg.isFromMe ? 'var(--ambev-blue)' : '#f0f2f5',
-                                                    color: msg.isFromMe ? 'white' : 'black',
-                                                    padding: '10px 14px',
-                                                    borderRadius: '12px',
-                                                    maxWidth: '80%',
-                                                    marginBottom: '10px',
-                                                    position: 'relative',
-                                                    fontSize: '0.9rem'
-                                                }}>
-                                                    {msg.messageBody}
-                                                    <div style={{ fontSize: '0.65rem', opacity: 0.7, marginTop: '4px', textAlign: 'right' }}>
-                                                        {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                    </div>
-                                                </div>
-                                            ))}
+                                            {(() => {
+                                                const normalize = p => String(p).replace(/\D/g, '');
+                                                const activeKey = normalize(activeContact);
+                                                return receivedMessages
+                                                    .filter(m => normalize(m.contactPhone) === activeKey)
+                                                    .map(msg => (
+                                                        <div key={msg.id} style={{
+                                                            alignSelf: msg.isFromMe ? 'flex-end' : 'flex-start',
+                                                            backgroundColor: msg.isFromMe ? 'var(--ambev-blue)' : '#f0f2f5',
+                                                            color: msg.isFromMe ? 'white' : 'black',
+                                                            padding: '10px 14px',
+                                                            borderRadius: '12px',
+                                                            maxWidth: '80%',
+                                                            marginBottom: '10px',
+                                                            position: 'relative',
+                                                            fontSize: '0.9rem'
+                                                        }}>
+                                                            {msg.messageBody}
+                                                            <div style={{ fontSize: '0.65rem', opacity: 0.7, marginTop: '4px', textAlign: 'right' }}>
+                                                                {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                            </div>
+                                                        </div>
+                                                    ));
+                                            })()}
                                         </div>
                                         <form
                                             style={{ padding: '1rem', borderTop: '1px solid #eee', display: 'flex', gap: '10px' }}
