@@ -113,6 +113,7 @@ function AppContent() {
     const [activeContact, setActiveContact] = useState(null);
     const [showToken, setShowToken] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    const [isRefreshing, setIsRefreshing] = useState(false);
     const [toasts, setToasts] = useState([]);
 
     const addToast = useCallback((message, type = 'info') => {
@@ -190,13 +191,18 @@ function AppContent() {
     }, [user?.id]);
 
     const fetchMessages = useCallback(async () => {
+        setIsRefreshing(true);
         try {
             const res = await fetch('/api/messages');
             if (res.ok) {
-                setReceivedMessages(await res.json());
+                const data = await res.json();
+                console.log('[MESSAGES] Fetched:', data.length);
+                setReceivedMessages(data);
             }
         } catch (err) {
             console.error('Failed to fetch messages:', err);
+        } finally {
+            setIsRefreshing(false);
         }
     }, []);
 
@@ -911,7 +917,7 @@ function Dashboard({
                                                         method: 'POST',
                                                         headers: { 'Content-Type': 'application/json' },
                                                         body: JSON.stringify({ phone })
-                                                    }).then(() => refreshMessages());
+                                                    }).then(() => fetchMessages());
                                                 }}
                                                 style={{
                                                     padding: '12px',
@@ -996,7 +1002,7 @@ function Dashboard({
                                                     if (res.ok) {
                                                         e.target.reply.value = '';
                                                         addToast('Mensagem enviada!', 'success');
-                                                        refreshMessages();
+                                                        fetchMessages();
                                                     } else {
                                                         addToast('Erro ao enviar resposta.', 'error');
                                                     }

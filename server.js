@@ -760,17 +760,22 @@ app.get('/webhook', (req, res) => {
 app.post('/webhook', async (req, res) => {
     try {
         const body = req.body;
+        console.log('[WEBHOOK] Received payload:', JSON.stringify(body, null, 2));
 
         if (body.object === 'whatsapp_business_account') {
-            if (body.entry?.[0]?.changes?.[0]?.value?.messages) {
-                const message = body.entry[0].changes[0].value.messages[0];
-                const contact = body.entry[0].changes[0].value.contacts[0];
+            const entry = body.entry?.[0];
+            const changes = entry?.changes?.[0];
+            const value = changes?.value;
+
+            if (value?.messages?.[0]) {
+                const message = value.messages[0];
+                const contact = value.contacts?.[0];
 
                 const from = message.from;
-                const name = contact.profile?.name || 'Cliente';
+                const name = contact?.profile?.name || 'Cliente';
                 const text = message.text ? message.text.body : '[Mídia/Outro tipo]';
 
-                console.log(`[WEBHOOK] Message from ${name} (${from}): ${text}`);
+                console.log(`[WEBHOOK] Processing message from ${name} (${from}): ${text}`);
 
                 await prisma.receivedMessage.create({
                     data: {
@@ -791,9 +796,12 @@ app.post('/webhook', async (req, res) => {
                         }));
                     }
                 });
+            } else if (value?.statuses) {
+                console.log('[WEBHOOK] Status update received');
             }
             res.sendStatus(200);
         } else {
+            console.warn('[WEBHOOK] Unknown object type:', body.object);
             res.sendStatus(404);
         }
     } catch (err) {
