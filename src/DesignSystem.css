@@ -906,3 +906,22 @@ textarea:disabled {
     height: 50vh !important;
   }
 }
+.legal-footer-login {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.legal-footer-login a {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.75rem;
+  font-weight: 300;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.legal-footer-login a:hover {
+  color: #fff;
+}
