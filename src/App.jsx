@@ -910,10 +910,16 @@ function Dashboard({
                                     </button>
                                 </div>
                                 <div className="contact-list" style={{ flex: 1, overflowY: 'auto', marginTop: '1rem' }}>
-                                    {/* Deduction of unique contacts with normalization */}
+                                    {/* Deduction of unique contacts with normalization (Brazil 9-digit fix) */}
                                     {(() => {
-                                        // Helper to normalize phone for grouping
-                                        const normalize = p => String(p).replace(/\D/g, '');
+                                        // Helper to normalize phone for grouping (Handling Brazil 9-digit issue)
+                                        const normalize = p => {
+                                            let s = String(p).replace(/\D/g, '');
+                                            if (s.startsWith('55') && s.length === 12) {
+                                                return s.slice(0, 4) + '9' + s.slice(4);
+                                            }
+                                            return s;
+                                        };
 
                                         // Group messages by normalized phone
                                         const groups = {};
@@ -925,38 +931,31 @@ function Dashboard({
 
                                         return Object.keys(groups).map(phoneKey => {
                                             const contactMsgs = groups[phoneKey];
-                                            // Prefer the non-normalized phone from the first message for display/key usage if needed, 
-                                            // but for consistency let's use the key or the most common one. 
-                                            // Let's use the phone from the last message.
-                                            const displayPhone = contactMsgs[0].contactPhone;
+                                            const bestPhone = contactMsgs.find(m => String(m.contactPhone).replace(/\D/g, '').length === 13)?.contactPhone || contactMsgs[0].contactPhone;
 
-                                            // Find name: prefer from incoming message, else from outgoing
                                             const incomingMsg = contactMsgs.find(m => !m.isFromMe);
                                             const outgoingMsg = contactMsgs.find(m => m.isFromMe);
-
-                                            // If we have an incoming message, use its name. 
-                                            // If not, use the outgoing message's name (which comes from our DB logic).
-                                            // Fallback to phone number.
-                                            const contactName = incomingMsg ? incomingMsg.contactName : (outgoingMsg ? outgoingMsg.contactName : displayPhone);
+                                            // Priority: Outgoing (Nome Fantasia) -> Incoming -> Phone
+                                            const contactName = outgoingMsg ? outgoingMsg.contactName : (incomingMsg ? incomingMsg.contactName : bestPhone);
 
                                             const hasUnread = contactMsgs.some(m => !m.isFromMe && !m.isRead);
-                                            const isSelected = String(activeContact).replace(/\D/g, '') === phoneKey;
+                                            const isSelected = normalize(activeContact) === phoneKey;
 
                                             return (
                                                 <div
                                                     key={phoneKey}
                                                     className={`contact-item ${isSelected ? 'active' : ''}`}
                                                     onClick={() => {
-                                                        setActiveContact(displayPhone);
+                                                        setActiveContact(bestPhone);
                                                         // Instant UI update
                                                         setReceivedMessages(prev => prev.map(m =>
-                                                            (String(m.contactPhone).replace(/\D/g, '') === phoneKey && !m.isFromMe) ? { ...m, isRead: true } : m
+                                                            (normalize(m.contactPhone) === phoneKey && !m.isFromMe) ? { ...m, isRead: true } : m
                                                         ));
 
                                                         fetch('/api/messages/mark-read', {
                                                             method: 'POST',
                                                             headers: { 'Content-Type': 'application/json' },
-                                                            body: JSON.stringify({ phone: displayPhone })
+                                                            body: JSON.stringify({ phone: bestPhone })
                                                         }).catch(err => console.error('Failed to mark as read:', err));
                                                     }}
                                                     style={{
@@ -1006,12 +1005,16 @@ function Dashboard({
                                                 <img
                                                     src={`/api/contacts/${activeContact}/photo?name=${encodeURIComponent(
                                                         (() => {
-                                                            const normalize = p => String(p).replace(/\D/g, '');
+                                                            const normalize = p => {
+                                                                let s = String(p).replace(/\D/g, '');
+                                                                if (s.startsWith('55') && s.length === 12) return s.slice(0, 4) + '9' + s.slice(4);
+                                                                return s;
+                                                            };
                                                             const activeKey = normalize(activeContact);
                                                             const contactMsgs = receivedMessages.filter(m => normalize(m.contactPhone) === activeKey);
                                                             const incomingMsg = contactMsgs.find(m => !m.isFromMe);
                                                             const outgoingMsg = contactMsgs.find(m => m.isFromMe);
-                                                            return incomingMsg ? incomingMsg.contactName : (outgoingMsg ? outgoingMsg.contactName : activeContact);
+                                                            return outgoingMsg ? outgoingMsg.contactName : (incomingMsg ? incomingMsg.contactName : activeContact);
                                                         })()
                                                     )}`}
                                                     alt="Avatar"
@@ -1020,12 +1023,16 @@ function Dashboard({
                                             <div style={{ flex: 1 }}>
                                                 <div style={{ fontWeight: 700 }}>
                                                     {(() => {
-                                                        const normalize = p => String(p).replace(/\D/g, '');
+                                                        const normalize = p => {
+                                                            let s = String(p).replace(/\D/g, '');
+                                                            if (s.startsWith('55') && s.length === 12) return s.slice(0, 4) + '9' + s.slice(4);
+                                                            return s;
+                                                        };
                                                         const activeKey = normalize(activeContact);
                                                         const contactMsgs = receivedMessages.filter(m => normalize(m.contactPhone) === activeKey);
                                                         const incomingMsg = contactMsgs.find(m => !m.isFromMe);
                                                         const outgoingMsg = contactMsgs.find(m => m.isFromMe);
-                                                        return incomingMsg ? incomingMsg.contactName : (outgoingMsg ? outgoingMsg.contactName : activeContact);
+                                                        return outgoingMsg ? outgoingMsg.contactName : (incomingMsg ? incomingMsg.contactName : activeContact);
                                                     })()}
                                                 </div>
                                                 <div style={{ fontSize: '0.8rem', color: '#666' }}>{activeContact}</div>
@@ -1033,7 +1040,11 @@ function Dashboard({
                                         </header>
                                         <div className="chat-messages" style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column-reverse' }}>
                                             {(() => {
-                                                const normalize = p => String(p).replace(/\D/g, '');
+                                                const normalize = p => {
+                                                    let s = String(p).replace(/\D/g, '');
+                                                    if (s.startsWith('55') && s.length === 12) return s.slice(0, 4) + '9' + s.slice(4);
+                                                    return s;
+                                                };
                                                 const activeKey = normalize(activeContact);
                                                 return receivedMessages
                                                     .filter(m => normalize(m.contactPhone) === activeKey)
