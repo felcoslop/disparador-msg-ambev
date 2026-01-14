@@ -678,10 +678,12 @@ app.get('/api/messages', async (req, res) => {
 // Mark messages as read
 app.post('/api/messages/mark-read', async (req, res) => {
     try {
-        const { phone } = req.body;
+        const { phone, phones } = req.body;
+        const targetPhones = phones || [phone];
+
         await prisma.receivedMessage.updateMany({
             where: {
-                contactPhone: phone,
+                contactPhone: { in: targetPhones },
                 isRead: false
             },
             data: { isRead: true }

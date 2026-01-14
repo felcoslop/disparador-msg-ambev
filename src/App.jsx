@@ -996,10 +996,13 @@ function Dashboard({
                                                             (normalize(m.contactPhone) === phoneKey && !m.isFromMe) ? { ...m, isRead: true } : m
                                                         ));
 
+                                                        // Get all unique raw phones in this group to mark as read
+                                                        const groupPhones = [...new Set(contactMsgs.map(m => m.contactPhone))];
+
                                                         fetch('/api/messages/mark-read', {
                                                             method: 'POST',
                                                             headers: { 'Content-Type': 'application/json' },
-                                                            body: JSON.stringify({ phone: bestPhone })
+                                                            body: JSON.stringify({ phones: groupPhones })
                                                         }).catch(err => console.error('Failed to mark as read:', err));
                                                     }}
                                                     style={{
