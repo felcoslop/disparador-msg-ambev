@@ -216,6 +216,19 @@ function AppContent() {
         }
     }, [user?.id, fetchUserData, fetchDispatches, fetchMessages]);
 
+    // Auto-polling for new messages
+    useEffect(() => {
+        if (user?.id && activeTab === 'recebidas') {
+            const interval = setInterval(() => {
+                // Only poll if not currently refreshing to avoid overlaps
+                if (!isRefreshing) {
+                    fetchMessages();
+                }
+            }, 5000);
+            return () => clearInterval(interval);
+        }
+    }, [user?.id, activeTab, fetchMessages, isRefreshing]);
+
     // Persist UI state
     useEffect(() => {
         localStorage.setItem('ambev_template_name_backup', templateName);
@@ -828,7 +841,7 @@ function Dashboard({
                                             <button className="btn-link" onClick={() => setCampaignData(null)}>Trocar base</button>
                                         </div>
                                         <div className="card ambev-flag" style={{ gridColumn: 'span 2', maxHeight: '400px', overflow: 'auto', padding: '1rem' }}>
-                                            <h3>📊 Preview dos Dados</h3>
+                                            <h3>Preview dos Dados</h3>
                                             <table className="preview-table">
                                                 <thead>
                                                     <tr>{headers.map(h => <th key={h}>{h}</th>)}</tr>
@@ -892,7 +905,7 @@ function Dashboard({
                                     <h3>Contatos</h3>
                                     <button
                                         className={`refresh-btn ${isRefreshing ? 'spinning' : ''}`}
-                                        onClick={refreshMessages}
+                                        onClick={fetchMessages}
                                         title="Atualizar mensagens"
                                         disabled={isRefreshing}
                                         style={{ padding: '4px', border: 'none', background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ambev-blue)' }}
@@ -913,11 +926,16 @@ function Dashboard({
                                                 className={`contact-item ${isSelected ? 'active' : ''}`}
                                                 onClick={() => {
                                                     setActiveContact(phone);
+                                                    // Instant UI update: mark local messages as read
+                                                    setReceivedMessages(prev => prev.map(m =>
+                                                        (m.contactPhone === phone && !m.isFromMe) ? { ...m, isRead: true } : m
+                                                    ));
+
                                                     fetch('/api/messages/mark-read', {
                                                         method: 'POST',
                                                         headers: { 'Content-Type': 'application/json' },
                                                         body: JSON.stringify({ phone })
-                                                    }).then(() => fetchMessages());
+                                                    }).catch(err => console.error('Failed to mark as read:', err));
                                                 }}
                                                 style={{
                                                     padding: '12px',
@@ -1027,7 +1045,7 @@ function Dashboard({
                 )}
 
                 {activeTab === 'historico' && (
-                    <div className="card ambev-flag" style={{ width: '100%' }}>
+                    <div className="card ambev-flag" style={{ width: '100%', boxSizing: 'border-box', maxWidth: '100%' }}>
                         <h3>Camppanhas Recentes</h3>
                         <div style={{ overflowX: 'auto' }}>
                             <table className="preview-table">
