@@ -656,6 +656,25 @@ app.post('/api/messages/mark-read', async (req, res) => {
     }
 });
 
+// Proxy route for contact profile photos
+app.get('/api/contacts/:phone/photo', async (req, res) => {
+    try {
+        const { phone } = req.params;
+        const name = req.query.name || 'Contact';
+
+        // NOTE: Official WhatsApp Cloud API does NOT provide an endpoint to fetch contact profile pictures.
+        // To get real photos, you would normally use a third-party API like Whapi.Cloud or similar.
+        // For now, we provide a consistent route that returns a styled avatar.
+
+        const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=280091&color=fff&size=500`;
+
+        // Redirect to the avatar service (or fetch and pipe if you want to mask it)
+        res.redirect(avatarUrl);
+    } catch (err) {
+        res.status(500).json({ error: 'Erro ao processar foto' });
+    }
+});
+
 // Send individual message
 app.post('/api/send-message', async (req, res) => {
     try {

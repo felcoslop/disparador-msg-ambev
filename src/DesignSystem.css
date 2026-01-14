@@ -906,6 +906,7 @@ textarea:disabled {
     height: 50vh !important;
   }
 }
+
 .legal-footer-login {
   margin-top: 1.5rem;
   display: flex;
@@ -926,6 +927,10 @@ textarea:disabled {
   color: #fff;
 }
 
+.contact-list {
+  overflow-x: hidden !important;
+}
+
 .unread-dot {
   width: 10px;
   height: 10px;
@@ -941,6 +946,7 @@ textarea:disabled {
   align-items: center;
   justify-content: space-between;
   width: 100%;
+  min-width: 0;
 }
 
 .contact-name {
@@ -950,6 +956,7 @@ textarea:disabled {
   text-overflow: ellipsis;
   flex: 1;
   margin-right: 8px;
+  min-width: 0;
 }
 
 .profile-avatar {
@@ -1034,7 +1041,13 @@ textarea:disabled {
 }
 
 @keyframes modalScale {
-  from { transform: scale(0.8); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
-}
+  from {
+    transform: scale(0.8);
+    opacity: 0;
+  }
 
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}

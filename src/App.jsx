@@ -943,7 +943,7 @@ function Dashboard({
                                                 })}
                                             >
                                                 <img
-                                                    src={`https://ui-avatars.com/api/?name=${encodeURIComponent(receivedMessages.find(m => m.contactPhone === activeContact)?.contactName || activeContact)}&background=280091&color=fff`}
+                                                    src={`/api/contacts/${activeContact}/photo?name=${encodeURIComponent(receivedMessages.find(m => m.contactPhone === activeContact)?.contactName || activeContact)}`}
                                                     alt="Avatar"
                                                 />
                                             </div>
@@ -1106,7 +1106,7 @@ function Dashboard({
                                 <X size={20} />
                             </button>
                             <img
-                                src={`https://ui-avatars.com/api/?name=${encodeURIComponent(showProfileModal.name)}&background=280091&color=fff&size=500`}
+                                src={`/api/contacts/${showProfileModal.phone}/photo?name=${encodeURIComponent(showProfileModal.name)}`}
                                 alt="Profile"
                             />
                         </div>
