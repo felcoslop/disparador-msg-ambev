@@ -116,6 +116,14 @@ function AppContent() {
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [toasts, setToasts] = useState([]);
 
+    const activeTab = useMemo(() => {
+        if (location.pathname === '/home') return 'disparos';
+        if (location.pathname === '/history') return 'historico';
+        if (location.pathname === '/received') return 'recebidas';
+        if (location.pathname === '/settings') return 'ajustes';
+        return 'disparos';
+    }, [location.pathname]);
+
     const addToast = useCallback((message, type = 'info') => {
         const id = Date.now();
         setToasts(prev => [...prev, { id, message, type }]);
