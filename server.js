@@ -406,6 +406,33 @@ async function processDispatch(dispatchId) {
                 }
             });
 
+            if (result.success) {
+                try {
+                    // Unified History: Check if we have enough params, otherwise fallback
+                    const p0 = params[0] || '';
+                    const p1 = params[1] || '';
+                    const p2 = params[2] || '';
+                    const p3 = params[3] || '';
+
+                    const unifiedBody = `Olá, ${p0}. Informamos que, devido a um imprevisto logístico, o pedido ${p1} não será entregue ${p2}. A entrega foi reagendada e será realizada ${p3}. Agradecemos a compreensão e seguimos à disposição.`;
+
+                    await prisma.receivedMessage.create({
+                        data: {
+                            contactPhone: String(result.phone || phone).replace(/\D/g, ''),
+                            contactName: p0,
+                            messageBody: unifiedBody,
+                            isFromMe: true,
+                            isRead: true
+                        }
+                    });
+
+                    // Trigger UI to fetch messages immediately
+                    broadcast(userId, 'message:received', {});
+                } catch (histErr) {
+                    console.error('[UNIFIED HISTORY ERROR]', histErr);
+                }
+            }
+
             // Update database state
             const updateData = {
                 currentIndex: i + 1,
