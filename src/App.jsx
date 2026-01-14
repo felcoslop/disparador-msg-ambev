@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { LogIn, UserPlus, LogOut, Settings, Upload, Send, History, AlertCircle, CheckCircle2, Eye, EyeOff, Play, Pause, RotateCcw, X, List, RefreshCw } from 'lucide-react';
+import { LogIn, UserPlus, LogOut, Settings, Upload, Send, History, AlertCircle, CheckCircle2, Eye, EyeOff, Play, Pause, RotateCcw, X, List, RefreshCw, Trash2 } from 'lucide-react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
@@ -617,6 +617,8 @@ function Dashboard({
     fetchMessages
 }) {
     const [isEditing, setIsEditing] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [selectedContacts, setSelectedContacts] = useState([]);
     const [tempConfig, setTempConfig] = useState(config);
     const [selectedLogDispatch, setSelectedLogDispatch] = useState(null);
     const [showProfileModal, setShowProfileModal] = useState(null); // Will store { name, phone }
@@ -899,15 +901,57 @@ function Dashboard({
                             <div className="card ambev-flag" style={{ width: '300px', flexShrink: 0, display: 'flex', flexDirection: 'column', padding: '1rem' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <h3>Contatos</h3>
-                                    <button
-                                        className={`refresh-btn ${isRefreshing ? 'spinning' : ''}`}
-                                        onClick={fetchMessages}
-                                        title="Atualizar mensagens"
-                                        disabled={isRefreshing}
-                                        style={{ padding: '4px', border: 'none', background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ambev-blue)' }}
-                                    >
-                                        <RefreshCw size={18} />
-                                    </button>
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                        <button
+                                            onClick={async (e) => {
+                                                e.stopPropagation();
+                                                if (isDeleting && selectedContacts.length > 0) {
+                                                    if (window.confirm(`Excluir ${selectedContacts.length} conversa(s)?`)) {
+                                                        const normalize = p => {
+                                                            let s = String(p).replace(/\D/g, '');
+                                                            if (s.startsWith('55') && s.length === 12) return s.slice(0, 4) + '9' + s.slice(4);
+                                                            return s;
+                                                        };
+                                                        const uniquePhones = [...new Set(
+                                                            receivedMessages
+                                                                .filter(m => selectedContacts.includes(normalize(m.contactPhone)))
+                                                                .map(m => m.contactPhone)
+                                                        )];
+                                                        try {
+                                                            await fetch('/api/messages/delete', {
+                                                                method: 'POST',
+                                                                headers: { 'Content-Type': 'application/json' },
+                                                                body: JSON.stringify({ phones: uniquePhones })
+                                                            });
+                                                            addToast({ type: 'success', title: 'Sucesso', message: 'Excluído(s).' });
+                                                            fetchMessages();
+                                                        } catch (e) {
+                                                            console.error(e);
+                                                            addToast({ type: 'error', title: 'Erro', message: 'Falha ao excluir.' });
+                                                        }
+                                                        setIsDeleting(false);
+                                                        setSelectedContacts([]);
+                                                    }
+                                                } else {
+                                                    setIsDeleting(!isDeleting);
+                                                    setSelectedContacts([]);
+                                                }
+                                            }}
+                                            title={isDeleting ? "Confirmar Exclusão" : "Excluir Conversas"}
+                                            style={{ padding: '4px', border: 'none', background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: isDeleting ? 'red' : '#999' }}
+                                        >
+                                            <Trash2 size={18} />
+                                        </button>
+                                        <button
+                                            className={`refresh-btn ${isRefreshing ? 'spinning' : ''}`}
+                                            onClick={fetchMessages}
+                                            title="Atualizar mensagens"
+                                            disabled={isRefreshing}
+                                            style={{ padding: '4px', border: 'none', background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ambev-blue)' }}
+                                        >
+                                            <RefreshCw size={18} />
+                                        </button>
+                                    </div>
                                 </div>
                                 <div className="contact-list" style={{ flex: 1, overflowY: 'auto', marginTop: '1rem' }}>
                                     {/* Deduction of unique contacts with normalization (Brazil 9-digit fix) */}
@@ -969,8 +1013,23 @@ function Dashboard({
                                                         boxSizing: 'border-box'
                                                     }}
                                                 >
-                                                    <div className="contact-header">
-                                                        <div className="contact-name">{contactName}</div>
+                                                    <div className="contact-header" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                        {isDeleting && (
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={selectedContacts.includes(phoneKey)}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                                onChange={(e) => {
+                                                                    if (selectedContacts.includes(phoneKey)) {
+                                                                        setSelectedContacts(prev => prev.filter(p => p !== phoneKey));
+                                                                    } else {
+                                                                        setSelectedContacts(prev => [...prev, phoneKey]);
+                                                                    }
+                                                                }}
+                                                                style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                                                            />
+                                                        )}
+                                                        <div className="contact-name" style={{ flex: 1 }}>{contactName}</div>
                                                         {hasUnread && <span className="unread-dot"></span>}
                                                     </div>
                                                 </div>

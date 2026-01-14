@@ -692,6 +692,25 @@ app.post('/api/messages/mark-read', async (req, res) => {
     }
 });
 
+// Delete messages
+app.post('/api/messages/delete', async (req, res) => {
+    try {
+        const { phones } = req.body;
+        if (!phones || !Array.isArray(phones) || phones.length === 0) {
+            return res.status(400).json({ error: 'Nenhum telefone fornecido' });
+        }
+        await prisma.receivedMessage.deleteMany({
+            where: {
+                contactPhone: { in: phones }
+            }
+        });
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[DELETE MESSAGES ERROR]', err);
+        res.status(500).json({ error: 'Erro ao excluir mensagens' });
+    }
+});
+
 // Proxy route for contact profile photos
 app.get('/api/contacts/:phone/photo', async (req, res) => {
     try {
