@@ -921,6 +921,7 @@ textarea:disabled {
   font-weight: 300;
   text-decoration: none;
   transition: color 0.2s;
+  box-sizing: border-box;
 }
 
 .legal-footer-login a:hover {
@@ -929,6 +930,8 @@ textarea:disabled {
 
 .contact-list {
   overflow-x: hidden !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
 }
 
 .unread-dot {
@@ -937,16 +940,24 @@ textarea:disabled {
   background-color: #25d366;
   border-radius: 50%;
   display: inline-block;
-  margin-left: 8px;
+  margin-left: 48px;
   box-shadow: 0 0 5px rgba(37, 211, 102, 0.5);
+  flex-shrink: 0;
+}
+
+.contact-item {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  overflow: hidden !important;
 }
 
 .contact-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   width: 100%;
   min-width: 0;
+  box-sizing: border-box;
 }
 
 .contact-name {

@@ -1,70 +1,59 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "sqlite"
-  url      = "file:/data/database.sqlite"
+  url      = env("DATABASE_URL")
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
-  name      String?
-  password  String
-  createdAt DateTime @default(now())
-
-  config     UserConfig?
+  id         Int         @id @default(autoincrement())
+  email      String      @unique
+  name       String?
+  password   String
+  createdAt  DateTime    @default(now())
   dispatches Dispatch[]
+  config     UserConfig?
 }
 
 model UserConfig {
   id           Int    @id @default(autoincrement())
   userId       Int    @unique
-  user         User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   token        String @default("")
   phoneId      String @default("")
   wabaId       String @default("")
   templateName String @default("")
-  mapping      String @default("{}") // JSON string
+  mapping      String @default("{}")
+  user         User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Dispatch {
-  id           Int      @id @default(autoincrement())
+  id           Int           @id @default(autoincrement())
   userId       Int
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   templateName String
   dateOld      String
   dateNew      String
-
-  status       String   @default("idle") // idle, running, paused, completed, error
-  totalLeads   Int      @default(0)
-  currentIndex Int      @default(0)
-  successCount Int      @default(0)
-  errorCount   Int      @default(0)
-
-  leadsData    String   @default("[]") // JSON array of leads
-
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
+  status       String        @default("idle")
+  totalLeads   Int           @default(0)
+  currentIndex Int           @default(0)
+  successCount Int           @default(0)
+  errorCount   Int           @default(0)
+  leadsData    String        @default("[]")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   logs         DispatchLog[]
 }
 
 model DispatchLog {
   id         Int      @id @default(autoincrement())
   dispatchId Int
-  dispatch   Dispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
-
   phone      String
-  status     String   // success, error
+  status     String
   message    String?
   createdAt  DateTime @default(now())
+  dispatch   Dispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
 }
 
 model ReceivedMessage {

@@ -917,7 +917,9 @@ function Dashboard({
                                                     cursor: 'pointer',
                                                     marginBottom: '8px',
                                                     border: isSelected ? '2px solid var(--ambev-blue)' : '1px solid #eee',
-                                                    backgroundColor: isSelected ? '#f0f4ff' : 'white'
+                                                    backgroundColor: isSelected ? '#f0f4ff' : 'white',
+                                                    width: '100%',
+                                                    boxSizing: 'border-box'
                                                 }}
                                             >
                                                 <div className="contact-header">
@@ -937,18 +939,23 @@ function Dashboard({
                                         <header style={{ padding: '1rem', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center' }}>
                                             <div
                                                 className="profile-avatar"
-                                                onClick={() => setShowProfileModal({
-                                                    name: receivedMessages.find(m => m.contactPhone === activeContact)?.contactName || activeContact,
-                                                    phone: activeContact
-                                                })}
+                                                onClick={() => {
+                                                    const contactMsgs = receivedMessages.filter(m => m.contactPhone === activeContact);
+                                                    const clientNameMsg = contactMsgs.find(m => !m.isFromMe);
+                                                    const clientName = clientNameMsg ? clientNameMsg.contactName : activeContact;
+                                                    setShowProfileModal({
+                                                        name: clientName,
+                                                        phone: activeContact
+                                                    });
+                                                }}
                                             >
                                                 <img
-                                                    src={`/api/contacts/${activeContact}/photo?name=${encodeURIComponent(receivedMessages.find(m => m.contactPhone === activeContact)?.contactName || activeContact)}`}
+                                                    src={`/api/contacts/${activeContact}/photo?name=${encodeURIComponent(receivedMessages.filter(m => m.contactPhone === activeContact).find(m => !m.isFromMe)?.contactName || activeContact)}`}
                                                     alt="Avatar"
                                                 />
                                             </div>
                                             <div style={{ flex: 1 }}>
-                                                <div style={{ fontWeight: 700 }}>{receivedMessages.find(m => m.contactPhone === activeContact)?.contactName || activeContact}</div>
+                                                <div style={{ fontWeight: 700 }}>{receivedMessages.filter(m => m.contactPhone === activeContact).find(m => !m.isFromMe)?.contactName || activeContact}</div>
                                                 <div style={{ fontSize: '0.8rem', color: '#666' }}>{activeContact}</div>
                                             </div>
                                         </header>
