@@ -32,6 +32,7 @@ COPY --from=build /app/dist ./dist
 COPY server.js .
 COPY database.js .
 COPY prisma ./prisma
+COPY politics ./politics
 
 # Create data directory for persistent database
 RUN mkdir -p /data

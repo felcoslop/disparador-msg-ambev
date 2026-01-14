@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { LogIn, UserPlus, LogOut, Settings, Upload, Send, History, AlertCircle, CheckCircle2, Eye, EyeOff, Play, Pause, RotateCcw, X, List } from 'lucide-react';
+import { LogIn, UserPlus, LogOut, Settings, Upload, Send, History, AlertCircle, CheckCircle2, Eye, EyeOff, Play, Pause, RotateCcw, X, List, RefreshCw } from 'lucide-react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
@@ -435,6 +435,12 @@ function LoginView({ onLogin, onSwitch }) {
                     <button type="submit" className="btn-primary w-full">Entrar</button>
                 </form>
                 <button className="btn-link" onClick={onSwitch}>Criar nova conta</button>
+                <div className="legal-footer">
+                    <div className="legal-footer-links">
+                        <a href="/politics/privacidade.html" target="_blank">Privacidade</a>
+                        <a href="/politics/termos.html" target="_blank">Termos</a>
+                    </div>
+                </div>
             </div>
             <style>{`
                 .auth-container { height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--ambev-gradient); }
@@ -473,6 +479,12 @@ function RegisterView({ onRegister, onSwitch }) {
                     <button type="submit" className="btn-primary w-full">Cadastrar</button>
                 </form>
                 <button className="btn-link" onClick={onSwitch}>Já tenho conta</button>
+                <div className="legal-footer">
+                    <div className="legal-footer-links">
+                        <a href="/politics/privacidade.html" target="_blank">Privacidade</a>
+                        <a href="/politics/termos.html" target="_blank">Termos</a>
+                    </div>
+                </div>
             </div>
         </div>
     );
@@ -542,8 +554,8 @@ function LogModal({ dispatch, onClose }) {
     );
 }
 
-// --- Dashboard ---
-function Dashboard({
+// --- AppContent (Dashboard) ---
+function AppContent({
     user,
     onLogout,
     config,
@@ -577,6 +589,24 @@ function Dashboard({
     const [isEditing, setIsEditing] = useState(false);
     const [tempConfig, setTempConfig] = useState(config);
     const [selectedLogDispatch, setSelectedLogDispatch] = useState(null);
+    const [isRefreshing, setIsRefreshing] = useState(false);
+
+    const refreshMessages = async () => {
+        setIsRefreshing(true);
+        try {
+            const res = await fetch('/api/messages');
+            if (res.ok) {
+                const data = await res.json();
+                setReceivedMessages(data);
+                addToast('Mensagens atualizadas!', 'success');
+            }
+        } catch (err) {
+            console.error('Refresh error:', err);
+            addToast('Erro ao atualizar mensagens', 'error');
+        } finally {
+            setIsRefreshing(false);
+        }
+    };
 
     const handleFileUpload = (e) => {
         const file = e.target.files[0];
@@ -847,99 +877,113 @@ function Dashboard({
                 )}
 
                 {activeTab === 'recebidas' && (
-                    <div className="received-container" style={{ display: 'flex', gap: '20px', height: 'calc(100vh - 160px)' }}>
-                        <div className="card ambev-flag" style={{ width: '300px', flexShrink: 0, display: 'flex', flexDirection: 'column', padding: '1rem' }}>
-                            <h3>Contatos</h3>
-                            <div className="contact-list" style={{ flex: 1, overflowY: 'auto', marginTop: '1rem' }}>
-                                {Array.from(new Set(receivedMessages.map(m => m.contactPhone))).map(phone => {
-                                    const lastMsg = receivedMessages.find(m => m.contactPhone === phone);
-                                    const isSelected = activeContact === phone;
-                                    return (
-                                        <div
-                                            key={phone}
-                                            className={`contact-item ${isSelected ? 'active' : ''}`}
-                                            onClick={() => setActiveContact(phone)}
-                                            style={{
-                                                padding: '12px',
-                                                borderRadius: '8px',
-                                                cursor: 'pointer',
-                                                marginBottom: '8px',
-                                                border: isSelected ? '2px solid var(--ambev-blue)' : '1px solid #eee',
-                                                backgroundColor: isSelected ? '#f0f4ff' : 'white'
-                                            }}
-                                        >
-                                            <div style={{ fontWeight: 600 }}>{lastMsg.contactName || phone}</div>
-                                            <div style={{ fontSize: '0.8rem', color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                                {lastMsg.messageBody}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                                {receivedMessages.length === 0 && <p style={{ textAlign: 'center', color: '#999', marginTop: '2rem' }}>Nenhuma mensagem.</p>}
-                            </div>
+                    <div className="card ambev-flag fade-in">
+                        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                            <h2 style={{ margin: 0 }}>📥 Mensagens Recebidas</h2>
+                            <button
+                                className={`refresh-btn ${isRefreshing ? 'spinning' : ''}`}
+                                onClick={refreshMessages}
+                                title="Atualizar mensagens"
+                                disabled={isRefreshing}
+                                style={{ padding: '8px', border: 'none', background: 'none', cursor: 'pointer' }}
+                            >
+                                <RefreshCw size={20} />
+                            </button>
                         </div>
-
-                        <div className="card ambev-flag chat-view" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0' }}>
-                            {activeContact ? (
-                                <>
-                                    <header style={{ padding: '1rem', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                        <div style={{ fontWeight: 700 }}>{receivedMessages.find(m => m.contactPhone === activeContact)?.contactName || activeContact}</div>
-                                        <div style={{ fontSize: '0.8rem', color: '#666' }}>{activeContact}</div>
-                                    </header>
-                                    <div className="chat-messages" style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column-reverse' }}>
-                                        {receivedMessages.filter(m => m.contactPhone === activeContact).map(msg => (
-                                            <div key={msg.id} style={{
-                                                alignSelf: msg.isFromMe ? 'flex-end' : 'flex-start',
-                                                backgroundColor: msg.isFromMe ? 'var(--ambev-blue)' : '#f0f2f5',
-                                                color: msg.isFromMe ? 'white' : 'black',
-                                                padding: '10px 14px',
-                                                borderRadius: '12px',
-                                                maxWidth: '80%',
-                                                marginBottom: '10px',
-                                                position: 'relative',
-                                                fontSize: '0.9rem'
-                                            }}>
-                                                {msg.messageBody}
-                                                <div style={{ fontSize: '0.65rem', opacity: 0.7, marginTop: '4px', textAlign: 'right' }}>
-                                                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        <div className="received-container" style={{ display: 'flex', gap: '20px', height: 'calc(100vh - 160px)' }}>
+                            <div className="card ambev-flag" style={{ width: '300px', flexShrink: 0, display: 'flex', flexDirection: 'column', padding: '1rem' }}>
+                                <h3>Contatos</h3>
+                                <div className="contact-list" style={{ flex: 1, overflowY: 'auto', marginTop: '1rem' }}>
+                                    {Array.from(new Set(receivedMessages.map(m => m.contactPhone))).map(phone => {
+                                        const lastMsg = receivedMessages.find(m => m.contactPhone === phone);
+                                        const isSelected = activeContact === phone;
+                                        return (
+                                            <div
+                                                key={phone}
+                                                className={`contact-item ${isSelected ? 'active' : ''}`}
+                                                onClick={() => setActiveContact(phone)}
+                                                style={{
+                                                    padding: '12px',
+                                                    borderRadius: '8px',
+                                                    cursor: 'pointer',
+                                                    marginBottom: '8px',
+                                                    border: isSelected ? '2px solid var(--ambev-blue)' : '1px solid #eee',
+                                                    backgroundColor: isSelected ? '#f0f4ff' : 'white'
+                                                }}
+                                            >
+                                                <div style={{ fontWeight: 600 }}>{lastMsg.contactName || phone}</div>
+                                                <div style={{ fontSize: '0.8rem', color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                    {lastMsg.messageBody}
                                                 </div>
                                             </div>
-                                        ))}
-                                    </div>
-                                    <form
-                                        style={{ padding: '1rem', borderTop: '1px solid #eee', display: 'flex', gap: '10px' }}
-                                        onSubmit={async (e) => {
-                                            e.preventDefault();
-                                            const text = e.target.reply.value;
-                                            if (!text) return;
-                                            try {
-                                                const res = await fetch('/api/send-message', {
-                                                    method: 'POST',
-                                                    headers: { 'Content-Type': 'application/json' },
-                                                    body: JSON.stringify({ userId: user.id, phone: activeContact, text })
-                                                });
-                                                if (res.ok) {
-                                                    e.target.reply.value = '';
-                                                    addToast('Mensagem enviada!', 'success');
-                                                    // receivedMessages will update via WS or the log inside API
-                                                } else {
-                                                    addToast('Erro ao enviar resposta.', 'error');
-                                                }
-                                            } catch (err) { addToast('Erro de conexão.', 'error'); }
-                                        }}
-                                    >
-                                        <input name="reply" type="text" placeholder="Digite uma resposta..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid #ddd' }} />
-                                        <button type="submit" className="btn-icon" style={{ backgroundColor: 'var(--ambev-blue)', color: 'white', borderRadius: '50%', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                            <Send size={20} />
-                                        </button>
-                                    </form>
-                                </>
-                            ) : (
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999', flexDirection: 'column' }}>
-                                    <AlertCircle size={48} strokeWidth={1} style={{ marginBottom: '1rem' }} />
-                                    Selecione um contato para ver as mensagens
+                                        );
+                                    })}
+                                    {receivedMessages.length === 0 && <p style={{ textAlign: 'center', color: '#999', marginTop: '2rem' }}>Nenhuma mensagem.</p>}
                                 </div>
-                            )}
+                            </div>
+
+                            <div className="card ambev-flag chat-view" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0' }}>
+                                {activeContact ? (
+                                    <>
+                                        <header style={{ padding: '1rem', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                            <div style={{ fontWeight: 700 }}>{receivedMessages.find(m => m.contactPhone === activeContact)?.contactName || activeContact}</div>
+                                            <div style={{ fontSize: '0.8rem', color: '#666' }}>{activeContact}</div>
+                                        </header>
+                                        <div className="chat-messages" style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column-reverse' }}>
+                                            {receivedMessages.filter(m => m.contactPhone === activeContact).map(msg => (
+                                                <div key={msg.id} style={{
+                                                    alignSelf: msg.isFromMe ? 'flex-end' : 'flex-start',
+                                                    backgroundColor: msg.isFromMe ? 'var(--ambev-blue)' : '#f0f2f5',
+                                                    color: msg.isFromMe ? 'white' : 'black',
+                                                    padding: '10px 14px',
+                                                    borderRadius: '12px',
+                                                    maxWidth: '80%',
+                                                    marginBottom: '10px',
+                                                    position: 'relative',
+                                                    fontSize: '0.9rem'
+                                                }}>
+                                                    {msg.messageBody}
+                                                    <div style={{ fontSize: '0.65rem', opacity: 0.7, marginTop: '4px', textAlign: 'right' }}>
+                                                        {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <form
+                                            style={{ padding: '1rem', borderTop: '1px solid #eee', display: 'flex', gap: '10px' }}
+                                            onSubmit={async (e) => {
+                                                e.preventDefault();
+                                                const text = e.target.reply.value;
+                                                if (!text) return;
+                                                try {
+                                                    const res = await fetch('/api/send-message', {
+                                                        method: 'POST',
+                                                        headers: { 'Content-Type': 'application/json' },
+                                                        body: JSON.stringify({ userId: user.id, phone: activeContact, text })
+                                                    });
+                                                    if (res.ok) {
+                                                        e.target.reply.value = '';
+                                                        addToast('Mensagem enviada!', 'success');
+                                                        // receivedMessages will update via WS or the log inside API
+                                                    } else {
+                                                        addToast('Erro ao enviar resposta.', 'error');
+                                                    }
+                                                } catch (err) { addToast('Erro de conexão.', 'error'); }
+                                            }}
+                                        >
+                                            <input name="reply" type="text" placeholder="Digite uma resposta..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid #ddd' }} />
+                                            <button type="submit" className="btn-icon" style={{ backgroundColor: 'var(--ambev-blue)', color: 'white', borderRadius: '50%', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                <Send size={20} />
+                                            </button>
+                                        </form>
+                                    </>
+                                ) : (
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999', flexDirection: 'column' }}>
+                                        <AlertCircle size={48} strokeWidth={1} style={{ marginBottom: '1rem' }} />
+                                        Selecione um contato para ver as mensagens
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}
@@ -1007,6 +1051,14 @@ function Dashboard({
                 )}
             </main>
 
+            <footer className="legal-footer">
+                <div className="legal-footer-links">
+                    <a href="/politics/privacidade.html" target="_blank">Privacidade</a>
+                    <a href="/politics/termos.html" target="_blank">Termos de Uso</a>
+                </div>
+                <p className="legal-footer-text">Ambev S.A. &copy; 2026 - Logística e Atendimento</p>
+            </footer>
+
             <div className="mobile-nav">
                 <button className={`mobile-nav-item ${activeTab === 'disparos' ? 'active' : ''}`} onClick={() => setActiveTab('disparos')}>
                     <Send size={24} />
@@ -1030,5 +1082,23 @@ function Dashboard({
                 <LogModal dispatch={selectedLogDispatch} onClose={() => setSelectedLogDispatch(null)} />
             )}
         </div>
+    ) : (
+        <Navigate to="/" />
     );
 }
+
+return (
+    <BrowserRouter>
+        <div className="app">
+            <Routes>
+                <Route path="/" element={user ? <Navigate to="/dashboard" /> : <LoginView onLogin={setUser} />} />
+                <Route path="/register" element={<RegisterView onLogin={setUser} />} />
+                <Route path="/dashboard" element={<AppContent />} />
+            </Routes>
+        </div>
+        <div id="toast-container"></div>
+    </BrowserRouter>
+);
+}
+
+export default App;

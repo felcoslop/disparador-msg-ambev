@@ -803,6 +803,7 @@ app.get('/api/status/:userId', async (req, res) => {
 });
 
 // --- SERVE STATIC FILES ---
+app.use('/politics', express.static(path.join(__dirname, 'politics')));
 app.use(express.static(path.join(__dirname, 'dist')));
 
 app.use((req, res) => {
