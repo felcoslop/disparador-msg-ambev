@@ -30,7 +30,6 @@ COPY --from=build /app/dist ./dist
 
 # Copy backend files, prisma schema and database logic
 COPY server.js .
-COPY database.js .
 COPY prisma ./prisma
 COPY politics ./politics
 
