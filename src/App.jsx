@@ -933,7 +933,7 @@ function Dashboard({
                                     {(() => {
                                         // Helper to normalize phone for grouping (Handling Brazil 9-digit issue)
                                         const normalize = p => {
-                                            let s = String(p).replace(/\D/g, '');
+                                            let s = String(p || '').replace(/\D/g, '');
                                             if (s.startsWith('55') && s.length === 12) {
                                                 return s.slice(0, 4) + '9' + s.slice(4);
                                             }
@@ -1007,7 +1007,19 @@ function Dashboard({
                                                                 style={{ width: '16px', height: '16px', cursor: 'pointer' }}
                                                             />
                                                         )}
-                                                        <div className="contact-name" style={{ flex: 1 }}>{contactName}</div>
+                                                        <div className="contact-name" style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                            <span>{contactName}</span>
+                                                            <span style={{ fontSize: '0.75rem', color: '#ccc' }}>
+                                                                {(() => {
+                                                                    const lastMsg = contactMsgs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+                                                                    if (!lastMsg || !lastMsg.createdAt) return '';
+                                                                    const date = new Date(lastMsg.createdAt);
+                                                                    if (isNaN(date.getTime())) return '';
+                                                                    const pad = n => String(n).padStart(2, '0');
+                                                                    return `${pad(date.getHours())}:${pad(date.getMinutes())} ${pad(date.getDate())}-${pad(date.getMonth() + 1)}`;
+                                                                })()}
+                                                            </span>
+                                                        </div>
                                                         {hasUnread && <span className="unread-dot"></span>}
                                                     </div>
                                                 </div>
@@ -1025,7 +1037,6 @@ function Dashboard({
                                             <div
                                                 className="profile-avatar"
                                                 onClick={() => {
-                                                    const normalize = p => String(p).replace(/\D/g, '');
                                                     const activeKey = normalize(activeContact);
                                                     const contactMsgs = receivedMessages.filter(m => normalize(m.contactPhone) === activeKey);
 
@@ -1298,15 +1309,15 @@ function Dashboard({
                                         addToast({ type: 'success', title: 'Sucesso', message: 'Excluído(s).' });
 
                                         // Reset UI state to prevent white screen
+                                        if (activeContact && uniquePhones.some(p => normalize(p) === normalize(activeContact))) {
+                                            setActiveContact(null);
+                                        }
                                         setIsDeleting(false);
                                         setSelectedContacts([]);
                                         setShowDeleteConfirm(false);
-                                        if (uniquePhones.some(p => normalize(p) === normalize(activeContact))) {
-                                            setActiveContact(null);
-                                        }
 
                                         // Refresh data
-                                        fetchMessages();
+                                        await fetchMessages();
 
                                     } catch (e) {
                                         console.error(e);
