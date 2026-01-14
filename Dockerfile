@@ -28,9 +28,10 @@ RUN npm install --legacy-peer-deps
 # Copy built frontend from build stage
 COPY --from=build /app/dist ./dist
 
-# Copy backend files and database logic
+# Copy backend files, prisma schema and database logic
 COPY server.js .
 COPY database.js .
+COPY prisma ./prisma
 
 # Create data directory for persistent database
 RUN mkdir -p /data
@@ -43,4 +44,5 @@ VOLUME ["/data"]
 
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+# Start using npm to trigger prisma initialization from package.json
+CMD ["npm", "start"]
