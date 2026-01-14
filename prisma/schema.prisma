@@ -58,13 +58,14 @@ model DispatchLog {
 }
 
 model ReceivedMessage {
-  id           Int      @id @default(autoincrement())
-  contactPhone String
-  contactName  String
-  messageBody  String
-  isFromMe     Boolean  @default(false)
-  isRead       Boolean  @default(false)
-  createdAt    DateTime @default(now())
+  id              Int      @id @default(autoincrement())
+  whatsappPhoneId String   @default("")
+  contactPhone    String
+  contactName     String
+  messageBody     String
+  isFromMe        Boolean  @default(false)
+  isRead          Boolean  @default(false)
+  createdAt       DateTime @default(now())
 }
 
 model Flow {

@@ -174,9 +174,10 @@ function AppContent() {
     }, [user?.id]);
 
     const fetchMessages = useCallback(async () => {
+        if (!config.phoneId || !config.token) return;
         setIsRefreshing(true);
         try {
-            const res = await fetch('/api/messages');
+            const res = await fetch(`/api/messages?phoneId=${config.phoneId}&token=${encodeURIComponent(config.token)}`);
             if (res.ok) {
                 const data = await res.json();
                 console.log('[MESSAGES] Fetched:', data.length);
@@ -187,7 +188,7 @@ function AppContent() {
         } finally {
             setIsRefreshing(false);
         }
-    }, []);
+    }, [config.phoneId, config.token]);
 
     // WebSocket message handler
     const handleWsMessage = useCallback((data) => {
@@ -1303,7 +1304,7 @@ function Dashboard({
                                                                 fetch('/api/messages/mark-read', {
                                                                     method: 'POST',
                                                                     headers: { 'Content-Type': 'application/json' },
-                                                                    body: JSON.stringify({ phones: groupPhones })
+                                                                    body: JSON.stringify({ phones: groupPhones, phoneId: config.phoneId })
                                                                 }).catch(err => console.error('Failed to mark as read:', err));
                                                             }}
                                                             style={{
@@ -1636,10 +1637,14 @@ function Dashboard({
                                         await fetch('/api/messages/delete', {
                                             method: 'POST',
                                             headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({ phones: uniquePhones })
+                                            body: JSON.stringify({
+                                                phones: uniquePhones,
+                                                phoneId: config.phoneId,
+                                                token: config.token
+                                            })
                                         });
 
-                                        addToast({ type: 'success', title: 'Sucesso', message: 'Excluído(s).' });
+                                        addToast('Conversas excluídas.', 'success');
 
                                         // Reset UI state to prevent white screen
                                         if (activeContact && uniquePhones.some(p => normalize(p) === normalize(activeContact))) {
@@ -1654,7 +1659,7 @@ function Dashboard({
 
                                     } catch (e) {
                                         console.error(e);
-                                        addToast({ type: 'error', title: 'Erro', message: 'Falha ao excluir.' });
+                                        addToast('Falha ao excluir.', 'error');
                                     }
                                 }}
                             >

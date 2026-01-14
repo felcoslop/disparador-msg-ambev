@@ -678,11 +678,25 @@ app.post('/api/dispatch/:dispatchId/retry', async (req, res) => {
 
 
 // --- MESSAGES ROUTES ---
+const validatePhoneAccess = async (phoneId, token) => {
+    if (!phoneId || !token) return false;
+    const config = await prisma.userConfig.findFirst({
+        where: { phoneId: String(phoneId), token: String(token) }
+    });
+    return !!config;
+};
 
 // Get received messages
 app.get('/api/messages', async (req, res) => {
     try {
+        const { phoneId, token } = req.query;
+        if (!phoneId) return res.status(400).json({ error: 'phoneId é obrigatório' });
+
+        const hasAccess = await validatePhoneAccess(phoneId, token);
+        if (!hasAccess) return res.status(403).json({ error: 'Acesso negado. Token inválido para este Phone ID.' });
+
         const messages = await prisma.receivedMessage.findMany({
+            where: { whatsappPhoneId: String(phoneId) },
             orderBy: { createdAt: 'desc' },
             take: 200
         });
@@ -696,11 +710,17 @@ app.get('/api/messages', async (req, res) => {
 // Mark messages as read
 app.post('/api/messages/mark-read', async (req, res) => {
     try {
-        const { phone, phones } = req.body;
+        const { phone, phones, phoneId, token } = req.body;
         const targetPhones = phones || [phone];
+
+        if (!phoneId) return res.status(400).json({ error: 'phoneId é obrigatório' });
+
+        const hasAccess = await validatePhoneAccess(phoneId, token);
+        if (!hasAccess) return res.status(403).json({ error: 'Acesso negado.' });
 
         await prisma.receivedMessage.updateMany({
             where: {
+                whatsappPhoneId: String(phoneId),
                 contactPhone: { in: targetPhones },
                 isRead: false
             },
@@ -716,12 +736,18 @@ app.post('/api/messages/mark-read', async (req, res) => {
 // Delete messages
 app.post('/api/messages/delete', async (req, res) => {
     try {
-        const { phones } = req.body;
+        const { phones, phoneId, token } = req.body;
+        if (!phoneId) return res.status(400).json({ error: 'phoneId é obrigatório' });
+
+        const hasAccess = await validatePhoneAccess(phoneId, token);
+        if (!hasAccess) return res.status(403).json({ error: 'Acesso negado.' });
+
         if (!phones || !Array.isArray(phones) || phones.length === 0) {
             return res.status(400).json({ error: 'Nenhum telefone fornecido' });
         }
         await prisma.receivedMessage.deleteMany({
             where: {
+                whatsappPhoneId: String(phoneId),
                 contactPhone: { in: phones }
             }
         });
@@ -798,6 +824,7 @@ app.post('/api/send-message', async (req, res) => {
         // Log sent message
         await prisma.receivedMessage.create({
             data: {
+                whatsappPhoneId: String(config.phoneId),
                 contactPhone: normalizedPhone,
                 contactName: 'Eu',
                 messageBody: text,
@@ -1036,8 +1063,20 @@ const FlowEngine = {
         }
     },
 
-    async executeStep(session, flow, config) {
+    async executeStep(session, flow, configInput) {
         try {
+            // Always fetch the freshest config from DB to ensure updates are reflected
+            const userConfig = await prisma.userConfig.findUnique({
+                where: { userId: flow.userId }
+            });
+
+            if (!userConfig || !userConfig.token || !userConfig.phoneId) {
+                console.error(`[FLOW] No valid config found for user ${flow.userId}`);
+                await this.logAction(session.id, session.currentStep, null, 'error', 'Configurações de WhatsApp (Token/Phone ID) não encontradas');
+                return;
+            }
+
+            const config = userConfig;
             const nodes = JSON.parse(flow.nodes);
             const edges = JSON.parse(flow.edges);
             const currentNode = nodes.find(n => n.id === session.currentStep);
@@ -1165,7 +1204,17 @@ const FlowEngine = {
         }
 
         const flow = session.flow;
-        const config = flow.user.config;
+        // Fetch freshest config
+        const userConfig = await prisma.userConfig.findUnique({
+            where: { userId: flow.userId }
+        });
+
+        if (!userConfig || !userConfig.token || !userConfig.phoneId) {
+            console.error(`[FLOW] No valid config found for user ${flow.userId} during reply processing`);
+            return;
+        }
+
+        const config = userConfig;
         const nodes = JSON.parse(flow.nodes);
         const edges = JSON.parse(flow.edges);
         const currentNode = nodes.find(n => n.id === session.currentStep);
@@ -1325,35 +1374,52 @@ app.post('/webhook', async (req, res) => {
             if (value?.messages?.[0]) {
                 const message = value.messages[0];
                 const contact = value.contacts?.[0];
+                const metadata = value.metadata;
+                const phoneId = metadata?.phone_number_id;
 
                 const from = message.from;
                 const name = contact?.profile?.name || 'Cliente';
                 const text = message.text ? message.text.body : '[Mídia/Outro tipo]';
 
-                console.log(`[WEBHOOK] Processing message from ${name} (${from}): ${text}`);
+                console.log(`[WEBHOOK] Processing message from ${name} (${from}) to phoneId ${phoneId}: ${text}`);
 
-                await prisma.receivedMessage.create({
-                    data: {
-                        contactPhone: from,
-                        contactName: name,
-                        messageBody: text,
-                        isFromMe: false,
-                        isRead: false
-                    }
-                });
+                if (phoneId) {
+                    await prisma.receivedMessage.create({
+                        data: {
+                            whatsappPhoneId: String(phoneId),
+                            contactPhone: from,
+                            contactName: name,
+                            messageBody: text,
+                            isFromMe: false,
+                            isRead: false
+                        }
+                    });
+                }
 
                 // Process Flow
                 if (text) {
                     await FlowEngine.processMessage(from, text);
                 }
 
-                // Broadcast to all connected clients
-                wss.clients.forEach((client) => {
-                    if (client.readyState === WebSocket.OPEN) {
-                        client.send(JSON.stringify({
-                            event: 'message:received',
-                            data: { from, name, text }
-                        }));
+                // Broadcast to clients listening to this phoneId
+                // Note: We need to know which client belongs to which phoneId.
+                // For now, let's look at their registered userId and its config.
+                // To optimize, we could store phoneId in the client object during WS auth.
+
+                wss.clients.forEach(async (client) => {
+                    if (client.readyState === WebSocket.OPEN && client.userId) {
+                        // Check if this user has this phoneId
+                        const u = await prisma.user.findUnique({
+                            where: { id: client.userId },
+                            include: { config: true }
+                        });
+
+                        if (u?.config?.phoneId === phoneId) {
+                            client.send(JSON.stringify({
+                                event: 'message:received',
+                                data: { from, name, text, phoneId }
+                            }));
+                        }
                     }
                 });
             } else if (value?.statuses) {
