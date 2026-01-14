@@ -1082,7 +1082,5 @@ function Dashboard({
                 <LogModal dispatch={selectedLogDispatch} onClose={() => setSelectedLogDispatch(null)} />
             )}
         </div>
-    ) : (
-        <Navigate to="/" />
     );
 }
