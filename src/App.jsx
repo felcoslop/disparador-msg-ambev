@@ -554,8 +554,8 @@ function LogModal({ dispatch, onClose }) {
     );
 }
 
-// --- AppContent (Dashboard) ---
-function AppContent({
+// --- Dashboard ---
+function Dashboard({
     user,
     onLogout,
     config,
@@ -1086,19 +1086,3 @@ function AppContent({
         <Navigate to="/" />
     );
 }
-
-return (
-    <BrowserRouter>
-        <div className="app">
-            <Routes>
-                <Route path="/" element={user ? <Navigate to="/dashboard" /> : <LoginView onLogin={setUser} />} />
-                <Route path="/register" element={<RegisterView onLogin={setUser} />} />
-                <Route path="/dashboard" element={<AppContent />} />
-            </Routes>
-        </div>
-        <div id="toast-container"></div>
-    </BrowserRouter>
-);
-}
-
-export default App;
