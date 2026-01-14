@@ -619,8 +619,8 @@ function Dashboard({
     const [isEditing, setIsEditing] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [selectedContacts, setSelectedContacts] = useState([]);
-    const [tempConfig, setTempConfig] = useState(config);
-    const [selectedLogDispatch, setSelectedLogDispatch] = useState(null);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [tempConfig, setTempConfig] = useState(config); const [selectedLogDispatch, setSelectedLogDispatch] = useState(null);
     const [showProfileModal, setShowProfileModal] = useState(null); // Will store { name, phone }
 
 
@@ -906,32 +906,7 @@ function Dashboard({
                                             onClick={async (e) => {
                                                 e.stopPropagation();
                                                 if (isDeleting && selectedContacts.length > 0) {
-                                                    if (window.confirm(`Excluir ${selectedContacts.length} conversa(s)?`)) {
-                                                        const normalize = p => {
-                                                            let s = String(p).replace(/\D/g, '');
-                                                            if (s.startsWith('55') && s.length === 12) return s.slice(0, 4) + '9' + s.slice(4);
-                                                            return s;
-                                                        };
-                                                        const uniquePhones = [...new Set(
-                                                            receivedMessages
-                                                                .filter(m => selectedContacts.includes(normalize(m.contactPhone)))
-                                                                .map(m => m.contactPhone)
-                                                        )];
-                                                        try {
-                                                            await fetch('/api/messages/delete', {
-                                                                method: 'POST',
-                                                                headers: { 'Content-Type': 'application/json' },
-                                                                body: JSON.stringify({ phones: uniquePhones })
-                                                            });
-                                                            addToast({ type: 'success', title: 'Sucesso', message: 'Excluído(s).' });
-                                                            fetchMessages();
-                                                        } catch (e) {
-                                                            console.error(e);
-                                                            addToast({ type: 'error', title: 'Erro', message: 'Falha ao excluir.' });
-                                                        }
-                                                        setIsDeleting(false);
-                                                        setSelectedContacts([]);
-                                                    }
+                                                    setShowDeleteConfirm(true);
                                                 } else {
                                                     setIsDeleting(!isDeleting);
                                                     setSelectedContacts([]);
@@ -1271,6 +1246,80 @@ function Dashboard({
                     </div>
                 )
             }
+            {showDeleteConfirm && (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+                }}>
+                    <div className="card fade-in" style={{ width: '400px', padding: '24px', backgroundColor: 'white', borderRadius: '12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', color: '#e02424' }}>
+                            <Trash2 size={28} />
+                            <h3 style={{ margin: 0, fontSize: '1.25rem' }}>Excluir Conversas</h3>
+                        </div>
+                        <p style={{ color: '#666', marginBottom: '24px' }}>
+                            Tem certeza que deseja excluir <strong>{selectedContacts.length}</strong> conversa(s)? Essa ação não pode ser desfeita.
+                        </p>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                            <button
+                                className="btn-secondary"
+                                onClick={() => setShowDeleteConfirm(false)}
+                                style={{ padding: '8px 16px' }}
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                className="btn-primary"
+                                style={{
+                                    backgroundColor: '#e02424',
+                                    color: 'white',
+                                    padding: '8px 16px',
+                                    border: 'none',
+                                    borderRadius: '6px'
+                                }}
+                                onClick={async () => {
+                                    const normalize = p => {
+                                        let s = String(p).replace(/\D/g, '');
+                                        if (s.startsWith('55') && s.length === 12) return s.slice(0, 4) + '9' + s.slice(4);
+                                        return s;
+                                    };
+                                    const uniquePhones = [...new Set(
+                                        receivedMessages
+                                            .filter(m => selectedContacts.includes(normalize(m.contactPhone)))
+                                            .map(m => m.contactPhone)
+                                    )];
+
+                                    try {
+                                        await fetch('/api/messages/delete', {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ phones: uniquePhones })
+                                        });
+
+                                        addToast({ type: 'success', title: 'Sucesso', message: 'Excluído(s).' });
+
+                                        // Reset UI state to prevent white screen
+                                        setIsDeleting(false);
+                                        setSelectedContacts([]);
+                                        setShowDeleteConfirm(false);
+                                        if (uniquePhones.some(p => normalize(p) === normalize(activeContact))) {
+                                            setActiveContact(null);
+                                        }
+
+                                        // Refresh data
+                                        fetchMessages();
+
+                                    } catch (e) {
+                                        console.error(e);
+                                        addToast({ type: 'error', title: 'Erro', message: 'Falha ao excluir.' });
+                                    }
+                                }}
+                            >
+                                Excluir
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div >
     );
 }
