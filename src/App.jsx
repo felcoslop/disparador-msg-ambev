@@ -888,7 +888,7 @@ function Dashboard({
                                 <RefreshCw size={20} />
                             </button>
                         </div>
-                        <div className="received-container" style={{ display: 'flex', gap: '20px', height: 'calc(100vh - 160px)' }}>
+                        <div className="received-container" style={{ display: 'flex', gap: '20px', height: 'calc(100vh - 280px)' }}>
                             <div className="card ambev-flag" style={{ width: '300px', flexShrink: 0, display: 'flex', flexDirection: 'column', padding: '1rem' }}>
                                 <h3>Contatos</h3>
                                 <div className="contact-list" style={{ flex: 1, overflowY: 'auto', marginTop: '1rem' }}>
