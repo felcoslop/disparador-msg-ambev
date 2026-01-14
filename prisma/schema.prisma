@@ -73,5 +73,6 @@ model ReceivedMessage {
   contactName  String
   messageBody  String
   isFromMe     Boolean  @default(false)
+  isRead       Boolean  @default(false)
   createdAt    DateTime @default(now())
 }

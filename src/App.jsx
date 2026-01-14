@@ -893,13 +893,23 @@ function Dashboard({
                                 <h3>Contatos</h3>
                                 <div className="contact-list" style={{ flex: 1, overflowY: 'auto', marginTop: '1rem' }}>
                                     {Array.from(new Set(receivedMessages.map(m => m.contactPhone))).map(phone => {
-                                        const lastMsg = receivedMessages.find(m => m.contactPhone === phone);
+                                        const contactMsgs = receivedMessages.filter(m => m.contactPhone === phone);
+                                        const clientNameMsg = contactMsgs.find(m => !m.isFromMe);
+                                        const contactName = clientNameMsg ? clientNameMsg.contactName : phone;
+                                        const hasUnread = contactMsgs.some(m => !m.isFromMe && !m.isRead);
                                         const isSelected = activeContact === phone;
                                         return (
                                             <div
                                                 key={phone}
                                                 className={`contact-item ${isSelected ? 'active' : ''}`}
-                                                onClick={() => setActiveContact(phone)}
+                                                onClick={() => {
+                                                    setActiveContact(phone);
+                                                    fetch('/api/messages/mark-read', {
+                                                        method: 'POST',
+                                                        headers: { 'Content-Type': 'application/json' },
+                                                        body: JSON.stringify({ phone })
+                                                    }).then(() => refreshMessages());
+                                                }}
                                                 style={{
                                                     padding: '12px',
                                                     borderRadius: '8px',
@@ -909,9 +919,9 @@ function Dashboard({
                                                     backgroundColor: isSelected ? '#f0f4ff' : 'white'
                                                 }}
                                             >
-                                                <div style={{ fontWeight: 600 }}>{lastMsg.contactName || phone}</div>
-                                                <div style={{ fontSize: '0.8rem', color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                                    {lastMsg.messageBody}
+                                                <div className="contact-header">
+                                                    <div style={{ fontWeight: 600 }}>{contactName}</div>
+                                                    {hasUnread && <span className="unread-dot"></span>}
                                                 </div>
                                             </div>
                                         );
@@ -962,7 +972,7 @@ function Dashboard({
                                                     if (res.ok) {
                                                         e.target.reply.value = '';
                                                         addToast('Mensagem enviada!', 'success');
-                                                        // receivedMessages will update via WS or the log inside API
+                                                        refreshMessages();
                                                     } else {
                                                         addToast('Erro ao enviar resposta.', 'error');
                                                     }

@@ -925,3 +925,20 @@ textarea:disabled {
 .legal-footer-login a:hover {
   color: #fff;
 }
+
+.unread-dot {
+  width: 10px;
+  height: 10px;
+  background-color: #25d366;
+  border-radius: 50%;
+  display: inline-block;
+  margin-left: 8px;
+  box-shadow: 0 0 5px rgba(37, 211, 102, 0.5);
+}
+
+.contact-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}

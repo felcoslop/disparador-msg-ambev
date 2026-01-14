@@ -638,6 +638,24 @@ app.get('/api/messages', async (req, res) => {
     }
 });
 
+// Mark messages as read
+app.post('/api/messages/mark-read', async (req, res) => {
+    try {
+        const { phone } = req.body;
+        await prisma.receivedMessage.updateMany({
+            where: {
+                contactPhone: phone,
+                isRead: false
+            },
+            data: { isRead: true }
+        });
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[MARK READ ERROR]', err);
+        res.status(500).json({ error: 'Erro ao marcar como lida' });
+    }
+});
+
 // Send individual message
 app.post('/api/send-message', async (req, res) => {
     try {
@@ -688,7 +706,8 @@ app.post('/api/send-message', async (req, res) => {
                 contactPhone: normalizedPhone,
                 contactName: 'Eu',
                 messageBody: text,
-                isFromMe: true
+                isFromMe: true,
+                isRead: true
             }
         });
 
@@ -738,7 +757,8 @@ app.post('/webhook', async (req, res) => {
                         contactPhone: from,
                         contactName: name,
                         messageBody: text,
-                        isFromMe: false
+                        isFromMe: false,
+                        isRead: false
                     }
                 });
 
