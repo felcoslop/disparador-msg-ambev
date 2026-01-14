@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { LogIn, UserPlus, LogOut, Settings, Upload, Send, History, AlertCircle, CheckCircle2, Eye, EyeOff, Play, Pause, RotateCcw, X, List, RefreshCw, Trash2 } from 'lucide-react';
+import { LogIn, UserPlus, LogOut, Settings, Upload, Send, History, AlertCircle, CheckCircle2, Eye, EyeOff, Play, Pause, RotateCcw, X, List, RefreshCw, Trash2, GitBranch } from 'lucide-react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
+import FlowBuilder from './FlowBuilder';
 
 // --- Global Constants ---
 const AMBEV_COLORS = {
@@ -121,6 +122,7 @@ function AppContent() {
         if (location.pathname === '/history') return 'historico';
         if (location.pathname === '/received') return 'recebidas';
         if (location.pathname === '/settings') return 'ajustes';
+        if (location.pathname === '/flows') return 'fluxos';
         return 'disparos';
     }, [location.pathname]);
 
@@ -363,7 +365,7 @@ function AppContent() {
         setTemplatePreview,
         dates,
         setDates,
-        setActiveTab: (tab) => navigate(`/${tab === 'disparos' ? 'home' : tab === 'historico' ? 'history' : tab === 'recebidas' ? 'received' : 'settings'}`),
+        setActiveTab: (tab) => navigate(`/${tab === 'disparos' ? 'home' : tab === 'historico' ? 'history' : tab === 'recebidas' ? 'received' : tab === 'fluxos' ? 'flows' : 'settings'}`),
         isRefreshing,
         fetchMessages,
         activeContact,
@@ -383,6 +385,7 @@ function AppContent() {
                 <Route path="/home" element={user ? <Dashboard {...commonProps} activeTab="disparos" /> : <Navigate to="/login" />} />
                 <Route path="/history" element={user ? <Dashboard {...commonProps} activeTab="historico" /> : <Navigate to="/login" />} />
                 <Route path="/received" element={user ? <Dashboard {...commonProps} activeTab="recebidas" /> : <Navigate to="/login" />} />
+                <Route path="/flows" element={user ? <Dashboard {...commonProps} activeTab="fluxos" /> : <Navigate to="/login" />} />
                 <Route path="/settings" element={user ? <Dashboard {...commonProps} activeTab="ajustes" /> : <Navigate to="/login" />} />
                 <Route path="*" element={<Navigate to={user ? "/home" : "/login"} />} />
             </Routes>
@@ -581,6 +584,186 @@ function LogModal({ dispatch, onClose }) {
     );
 }
 
+// --- Flow Sessions History Component ---
+function FlowSessionsHistory({ userId }) {
+    const [sessions, setSessions] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [expandedSession, setExpandedSession] = useState(null);
+    const [sessionLogs, setSessionLogs] = useState([]);
+    const [loadingLogs, setLoadingLogs] = useState(false);
+
+    useEffect(() => {
+        const fetchSessions = async () => {
+            try {
+                const res = await fetch(`/api/flow-sessions/${userId}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    setSessions(data);
+                }
+            } catch (err) {
+                console.error('Error fetching flow sessions:', err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchSessions();
+    }, [userId]);
+
+    const toggleLogs = async (sessionId) => {
+        if (expandedSession === sessionId) {
+            setExpandedSession(null);
+            setSessionLogs([]);
+            return;
+        }
+
+        setExpandedSession(sessionId);
+        setLoadingLogs(true);
+        try {
+            const res = await fetch(`/api/flow-session-logs/${sessionId}`);
+            if (res.ok) {
+                const data = await res.json();
+                setSessionLogs(data);
+            }
+        } catch (err) {
+            console.error('Error fetching logs:', err);
+        } finally {
+            setLoadingLogs(false);
+        }
+    };
+
+    const getStatusBadge = (status) => {
+        const colors = {
+            'active': { bg: '#e3f2fd', color: '#1976d2' },
+            'waiting_reply': { bg: '#fff3e0', color: '#f57c00' },
+            'completed': { bg: '#e8f5e9', color: '#388e3c' },
+            'error': { bg: '#ffebee', color: '#d32f2f' }
+        };
+        const style = colors[status] || { bg: '#f5f5f5', color: '#666' };
+        return (
+            <span style={{
+                padding: '4px 8px',
+                borderRadius: '12px',
+                fontSize: '11px',
+                fontWeight: 600,
+                backgroundColor: style.bg,
+                color: style.color
+            }}>
+                {status === 'active' ? '🔄 Ativo' :
+                    status === 'waiting_reply' ? 'Aguardando' :
+                        status === 'completed' ? 'Concluído' : status}
+            </span>
+        );
+    };
+
+    const getActionIcon = (action) => {
+        switch (action) {
+            case 'sent_message': return '📤';
+            case 'waiting_reply': return '⏳';
+            case 'received_reply': return '📥';
+            case 'invalid_reply': return '❌';
+            case 'completed': return '✅';
+            case 'error': return '🔴';
+            default: return '📝';
+        }
+    };
+
+    const getActionLabel = (action) => {
+        switch (action) {
+            case 'sent_message': return 'Mensagem enviada';
+            case 'waiting_reply': return 'Aguardando resposta';
+            case 'received_reply': return 'Resposta recebida';
+            case 'invalid_reply': return 'Resposta inválida';
+            case 'completed': return 'Fluxo concluído';
+            case 'error': return 'Erro';
+            default: return action;
+        }
+    };
+
+    return (
+        <div className="card ambev-flag" style={{ width: '100%' }}>
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>🔀</span> Sessões de Fluxo
+            </h3>
+            {loading ? (
+                <p style={{ color: '#999', textAlign: 'center', padding: '20px' }}>Carregando...</p>
+            ) : sessions.length === 0 ? (
+                <p style={{ color: '#999', textAlign: 'center', padding: '20px' }}>Nenhuma sessão de fluxo encontrada.</p>
+            ) : (
+                <div style={{ overflowX: 'auto' }}>
+                    <table className="preview-table">
+                        <thead>
+                            <tr>
+                                <th style={{ width: '40px' }}></th>
+                                <th>Telefone</th>
+                                <th>Fluxo</th>
+                                <th>Mensagem Atual</th>
+                                <th>Status</th>
+                                <th>Última Atualização</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {sessions.map(s => (
+                                <React.Fragment key={s.id}>
+                                    <tr
+                                        style={{ cursor: 'pointer', backgroundColor: expandedSession === s.id ? '#f5f5f5' : 'transparent' }}
+                                        onClick={() => toggleLogs(s.id)}
+                                    >
+                                        <td style={{ textAlign: 'center' }}>{expandedSession === s.id ? '▼' : '▶'}</td>
+                                        <td style={{ fontFamily: 'monospace' }}>{s.contactPhone}</td>
+                                        <td><strong>{s.flowName}</strong></td>
+                                        <td style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.currentStepName}>
+                                            {s.currentStepName}
+                                        </td>
+                                        <td>{getStatusBadge(s.status)}</td>
+                                        <td style={{ fontSize: '0.8rem' }}>{new Date(s.updatedAt).toLocaleString('pt-BR')}</td>
+                                    </tr>
+                                    {expandedSession === s.id && (
+                                        <tr>
+                                            <td colSpan="6" style={{ padding: 0, backgroundColor: '#fafafa' }}>
+                                                <div style={{ padding: '12px 24px', borderLeft: '4px solid #280091' }}>
+                                                    <strong style={{ fontSize: '12px', color: '#666' }}>Histórico de Ações:</strong>
+                                                    {loadingLogs ? (
+                                                        <p style={{ margin: '8px 0', color: '#999' }}>Carregando logs...</p>
+                                                    ) : sessionLogs.length === 0 ? (
+                                                        <p style={{ margin: '8px 0', color: '#999' }}>Nenhum log encontrado.</p>
+                                                    ) : (
+                                                        <div style={{ marginTop: '8px', maxHeight: '200px', overflowY: 'auto' }}>
+                                                            {sessionLogs.map(log => (
+                                                                <div key={log.id} style={{
+                                                                    display: 'flex',
+                                                                    alignItems: 'flex-start',
+                                                                    gap: '10px',
+                                                                    padding: '6px 0',
+                                                                    borderBottom: '1px solid #eee',
+                                                                    fontSize: '12px'
+                                                                }}>
+                                                                    <span style={{ fontSize: '14px' }}>{getActionIcon(log.action)}</span>
+                                                                    <div style={{ flex: 1 }}>
+                                                                        <div style={{ fontWeight: 600 }}>{getActionLabel(log.action)}</div>
+                                                                        {log.nodeName && <span style={{ color: '#666' }}>Nó: {log.nodeName}</span>}
+                                                                        {log.details && <p style={{ margin: '4px 0 0', color: '#333' }}>{log.details}</p>}
+                                                                    </div>
+                                                                    <span style={{ color: '#999', fontSize: '10px', whiteSpace: 'nowrap' }}>
+                                                                        {new Date(log.createdAt).toLocaleTimeString('pt-BR')}
+                                                                    </span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </React.Fragment>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </div>
+    );
+}
+
 // --- Dashboard ---
 function Dashboard({
     user,
@@ -622,7 +805,45 @@ function Dashboard({
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [tempConfig, setTempConfig] = useState(config); const [selectedLogDispatch, setSelectedLogDispatch] = useState(null);
     const [showProfileModal, setShowProfileModal] = useState(null); // Will store { name, phone }
+    const [dispatchMode, setDispatchMode] = useState('template'); // 'template' or 'flow'
+    const [availableFlows, setAvailableFlows] = useState([]);
+    const [selectedFlowId, setSelectedFlowId] = useState(null);
 
+    // Fetch available flows when dispatch mode changes to 'flow'
+    useEffect(() => {
+        if (dispatchMode === 'flow' && user?.id) {
+            fetch(`/api/flows/${user.id}`)
+                .then(res => res.json())
+                .then(data => setAvailableFlows(data || []))
+                .catch(err => console.error('Error fetching flows:', err));
+        }
+    }, [dispatchMode, user?.id]);
+
+
+    const applyAutoMapping = (cols) => {
+        const newMapping = { ...mapping };
+        cols.forEach(header => {
+            const h = String(header).toLowerCase().trim();
+
+            // Priority matching
+            if (h === 'cód. cliente' || h === 'cod. cliente' || h === 'código' || h === 'codigo') {
+                newMapping.client_code = header;
+            } else if (h === 'nome fantasia' || h === 'fantasia' || h === 'nome') {
+                newMapping.fantasy_name = header;
+            } else if (h === 'tel. promax' || h === 'telefone' || h === 'tel' || h === 'tel.' || h === 'phone' || h === 'celular') {
+                newMapping.phone = header;
+            } else if (h === 'nº do pedido' || h === 'pedido' || h === 'order' || h === 'nº pedido') {
+                newMapping.order_number = header;
+            }
+
+            // Fallback fuzzy matching if still empty
+            if (!newMapping.client_code && (h.includes('cód') || h.includes('cod'))) newMapping.client_code = header;
+            if (!newMapping.fantasy_name && (h.includes('fantasia') || h.includes('nome'))) newMapping.fantasy_name = header;
+            if (!newMapping.phone && (h.includes('tel') || h.includes('phone') || h.includes('celular'))) newMapping.phone = header;
+            if (!newMapping.order_number && (h.includes('pedido') || h.includes('pedido'))) newMapping.order_number = header;
+        });
+        setMapping(newMapping);
+    };
 
     const handleFileUpload = (e) => {
         const file = e.target.files[0];
@@ -636,10 +857,12 @@ function Dashboard({
                 const ws = wb.Sheets[wb.SheetNames[0]];
                 const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
                 if (data.length > 0) {
-                    setHeaders(data[0]);
+                    const cols = data[0];
+                    setHeaders(cols);
+                    applyAutoMapping(cols);
                     setCampaignData(data.slice(1).map(row => {
                         const obj = {};
-                        data[0].forEach((header, i) => obj[header] = row[i]);
+                        cols.forEach((header, i) => obj[header] = row[i]);
                         obj._raw = row;
                         return obj;
                     }));
@@ -650,6 +873,7 @@ function Dashboard({
             Papa.parse(file, {
                 header: true, skipEmptyLines: true, complete: (results) => {
                     setHeaders(results.meta.fields);
+                    applyAutoMapping(results.meta.fields);
                     setCampaignData(results.data);
                 }
             });
@@ -773,6 +997,7 @@ function Dashboard({
                 </div>
                 <nav>
                     <button className={`nav-item ${activeTab === 'disparos' ? 'active' : ''}`} onClick={() => setActiveTab('disparos')}><Send size={20} /> Disparos</button>
+                    <button className={`nav-item ${activeTab === 'fluxos' ? 'active' : ''}`} onClick={() => setActiveTab('fluxos')}><GitBranch size={20} /> Fluxos</button>
                     <button className={`nav-item ${activeTab === 'historico' ? 'active' : ''}`} onClick={() => setActiveTab('historico')}><History size={20} /> Histórico</button>
                     <button className={`nav-item ${activeTab === 'recebidas' ? 'active' : ''}`} onClick={() => setActiveTab('recebidas')}><AlertCircle size={20} /> Recebidas</button>
                     <button className={`nav-item ${activeTab === 'ajustes' ? 'active' : ''}`} onClick={() => setActiveTab('ajustes')}><Settings size={20} /> Ajustes</button>
@@ -784,292 +1009,410 @@ function Dashboard({
             </aside>
 
             <main className="content">
-                <header className="content-header">
-                    <h1>{activeTab === 'disparos' ? 'Automação de Notificações' : activeTab === 'historico' ? 'Histórico' : activeTab === 'recebidas' ? 'Mensagens Recebidas' : 'Configurações'}</h1>
-                    {activeTab === 'disparos' && activeDispatch?.status === 'running' && <div className="badge-live">Live</div>}
-                </header>
+                {activeTab === 'fluxos' ? (
+                    <FlowBuilder user={user} addToast={addToast} />
+                ) : (
+                    <>
+                        <header className="content-header">
+                            <h1>{activeTab === 'disparos' ? 'Automação de Notificações' : activeTab === 'historico' ? 'Histórico' : activeTab === 'recebidas' ? 'Mensagens Recebidas' : 'Configurações'}</h1>
+                            {activeTab === 'disparos' && activeDispatch?.status === 'running' && <div className="badge-live">Live</div>}
+                        </header>
 
-                {activeTab === 'disparos' && (
-                    <section className="dashboard-grid">
-                        {activeDispatch && (activeDispatch.status === 'running' || activeDispatch.status === 'paused' || activeDispatch.status === 'stopped') ? (
-                            <div className="card ambev-flag progress-container" style={{ gridColumn: 'span 2' }}>
-                                <div className="progress-header">
-                                    <span>#{activeDispatch.id} - Progresso: {activeDispatch.currentIndex} / {activeDispatch.totalLeads}</span>
-                                    <div className="status-group">
-                                        {activeDispatch.errorCount > 0 && <span className="error-badge">{activeDispatch.errorCount} erros</span>}
-                                        <span className={`status-badge ${activeDispatch.status}`}>{activeDispatch.status}</span>
-                                    </div>
-                                </div>
-                                <div className="progress-bar-bg">
-                                    <div className="progress-bar-fill" style={{ width: `${(activeDispatch.currentIndex / activeDispatch.totalLeads) * 100 || 0}%` }}></div>
-                                </div>
-                                <div className="progress-controls">
-                                    {activeDispatch.status === 'running' ? (
-                                        <button className="btn-pause" onClick={() => controlDispatch('pause')}><Pause size={18} /> Pausar</button>
-                                    ) : (
-                                        <button className="btn-resume" onClick={() => controlDispatch('resume')}><Play size={18} /> Continuar</button>
-                                    )}
-                                    <button className="btn-secondary" onClick={() => controlDispatch('stop')}><RotateCcw size={18} /> Parar tudo</button>
-                                    <button className="btn-secondary" onClick={() => setSelectedLogDispatch(activeDispatch)}><List size={18} /> Ver Logs</button>
-                                </div>
-                                {activeDispatch.lastLog && (
-                                    <div className="log-container">
-                                        <label>Último:</label>
-                                        <div className={`log-entry ${activeDispatch.lastLog.status === 'error' ? 'error' : ''}`}>
-                                            {activeDispatch.lastLog.phone}: {activeDispatch.lastLog.status === 'success' ? '✓ OK' : `✗ ${activeDispatch.lastLog.message}`}
+                        {activeTab === 'disparos' && (
+                            <section className="dashboard-grid">
+                                {activeDispatch && (activeDispatch.status === 'running' || activeDispatch.status === 'paused' || activeDispatch.status === 'stopped') ? (
+                                    <div className="card ambev-flag progress-container" style={{ gridColumn: 'span 2' }}>
+                                        <div className="progress-header">
+                                            <span>#{activeDispatch.id} - Progresso: {activeDispatch.currentIndex} / {activeDispatch.totalLeads}</span>
+                                            <div className="status-group">
+                                                {activeDispatch.errorCount > 0 && <span className="error-badge">{activeDispatch.errorCount} erros</span>}
+                                                <span className={`status-badge ${activeDispatch.status}`}>{activeDispatch.status}</span>
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
-                            </div>
-                        ) : (
-                            <>
-                                {!campaignData ? (
-                                    <div className="card ambev-flag upload-card" style={{ gridColumn: 'span 2' }}>
-                                        <h3><Upload size={18} /> Base de Dados</h3>
-                                        <div className="dropzone" onClick={() => document.getElementById('fileInput').click()}>
-                                            <input type="file" id="fileInput" className="hidden" accept=".xlsx,.xls,.csv" onChange={handleFileUpload} />
-                                            <div className="dropzone-label"><Upload size={48} strokeWidth={1} /><span>Clique ou arraste o arquivo</span></div>
+                                        <div className="progress-bar-bg">
+                                            <div className="progress-bar-fill" style={{ width: `${(activeDispatch.currentIndex / activeDispatch.totalLeads) * 100 || 0}%` }}></div>
                                         </div>
+                                        <div className="progress-controls">
+                                            {activeDispatch.status === 'running' ? (
+                                                <button className="btn-pause" onClick={() => controlDispatch('pause')}><Pause size={18} /> Pausar</button>
+                                            ) : (
+                                                <button className="btn-resume" onClick={() => controlDispatch('resume')}><Play size={18} /> Continuar</button>
+                                            )}
+                                            <button className="btn-secondary" onClick={() => controlDispatch('stop')}><RotateCcw size={18} /> Parar tudo</button>
+                                            <button className="btn-secondary" onClick={() => setSelectedLogDispatch(activeDispatch)}><List size={18} /> Ver Logs</button>
+                                        </div>
+                                        {activeDispatch.lastLog && (
+                                            <div className="log-container">
+                                                <label>Último:</label>
+                                                <div className={`log-entry ${activeDispatch.lastLog.status === 'error' ? 'error' : ''}`}>
+                                                    {activeDispatch.lastLog.phone}: {activeDispatch.lastLog.status === 'success' ? '✓ OK' : `✗ ${activeDispatch.lastLog.message}`}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 ) : (
                                     <>
-                                        <div className="card ambev-flag upload-success" style={{ gridColumn: 'span 2' }}>
-                                            <CheckCircle2 size={48} color="var(--ambev-green)" />
-                                            <h3>Base carregada: {campaignData.length} leads</h3>
-                                            <button className="btn-link" onClick={() => setCampaignData(null)}>Trocar base</button>
-                                        </div>
-                                        <div className="card ambev-flag" style={{ gridColumn: 'span 2', maxHeight: '400px', overflow: 'auto', padding: '1rem' }}>
-                                            <h3>Preview dos Dados</h3>
-                                            <table className="preview-table">
-                                                <thead>
-                                                    <tr>{headers.map(h => <th key={h}>{h}</th>)}</tr>
-                                                </thead>
-                                                <tbody>
-                                                    {campaignData.slice(0, 10).map((row, i) => (
-                                                        <tr key={i}>
-                                                            {headers.map(h => <td key={h}>{row[h]}</td>)}
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                            {campaignData.length > 10 && <p style={{ fontSize: '0.8rem', color: '#666', marginTop: '10px' }}>Exibindo os primeiros 10 leads de {campaignData.length}.</p>}
-                                        </div>
-                                    </>
-                                )}
-                                {campaignData && (
-                                    <>
-                                        <div className="card ambev-flag mapping-card">
-                                            <h3>Mapeamento</h3>
-                                            <div className="mapping-grid">
-                                                {REQUIRED_COLUMNS.map(col => (
-                                                    <div key={col.id} className="input-group">
-                                                        <label>{col.label}</label>
-                                                        <select value={mapping[col.id] || ''} onChange={e => setMapping({ ...mapping, [col.id]: e.target.value })}>
-                                                            <option value="">Coluna...</option>
-                                                            {headers.map(h => <option key={h} value={h}>{h}</option>)}
-                                                        </select>
-                                                    </div>
-                                                ))}
+                                        {!campaignData ? (
+                                            <div className="card ambev-flag upload-card" style={{ gridColumn: 'span 2' }}>
+                                                <h3><Upload size={18} /> Base de Dados</h3>
+                                                <div className="dropzone" onClick={() => document.getElementById('fileInput').click()}>
+                                                    <input type="file" id="fileInput" className="hidden" accept=".xlsx,.xls,.csv" onChange={handleFileUpload} />
+                                                    <div className="dropzone-label"><Upload size={48} strokeWidth={1} /><span>Clique ou arraste o arquivo</span></div>
+                                                </div>
                                             </div>
-                                        </div>
-                                        <div className="card ambev-flag template-card">
-                                            <h3>Datas e Template</h3>
-                                            <div className="input-group"><label>Template Meta</label><input type="text" value={templateName} onChange={e => setTemplateName(e.target.value)} /></div>
-                                            <div className="input-grid mt-4">
-                                                <div className="input-group"><label>Antiga</label><input type="text" placeholder="12/01" value={dates.old} onChange={e => setDates({ ...dates, old: e.target.value })} /></div>
-                                                <div className="input-group"><label>Nova</label><input type="text" placeholder="13/01" value={dates.new} onChange={e => setDates({ ...dates, new: e.target.value })} /></div>
-                                            </div>
-                                            <button className="btn-secondary mt-2" onClick={() => setTemplatePreview(true)}>Validar Template</button>
-                                            {templatePreview && renderTemplatePreview()}
-                                        </div>
-                                        <div className="dispatch-actions" style={{ gridColumn: 'span 2' }}>
-                                            <button className="btn-primary btn-lg" onClick={startDispatch}><Send size={24} /> Iniciar Disparo</button>
-                                        </div>
-                                    </>
-                                )}
-                            </>
-                        )}
-                    </section>
-                )}
-
-                {activeTab === 'recebidas' && (
-                    <div className="card ambev-flag fade-in">
-                        <div className="card-header" style={{ marginBottom: '1rem' }}>
-                            {/* Refresh button moved to Chat Header */}
-                        </div>
-                        <div className="received-container" style={{ display: 'flex', gap: '20px', height: 'calc(100vh - 280px)' }}>
-                            <div className="card ambev-flag" style={{ width: '300px', flexShrink: 0, display: 'flex', flexDirection: 'column', padding: '1rem' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <h3>Contatos</h3>
-                                    <div style={{ display: 'flex', gap: '8px' }}>
-                                        <button
-                                            onClick={async (e) => {
-                                                e.stopPropagation();
-                                                if (isDeleting && selectedContacts.length > 0) {
-                                                    setShowDeleteConfirm(true);
-                                                } else {
-                                                    setIsDeleting(!isDeleting);
-                                                    setSelectedContacts([]);
-                                                }
-                                            }}
-                                            title={isDeleting ? "Confirmar Exclusão" : "Excluir Conversas"}
-                                            style={{ padding: '4px', border: 'none', background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: isDeleting ? 'red' : '#999' }}
-                                        >
-                                            <Trash2 size={18} />
-                                        </button>
-                                        <button
-                                            className={`refresh-btn ${isRefreshing ? 'spinning' : ''}`}
-                                            onClick={fetchMessages}
-                                            title="Atualizar mensagens"
-                                            disabled={isRefreshing}
-                                            style={{ padding: '4px', border: 'none', background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ambev-blue)' }}
-                                        >
-                                            <RefreshCw size={18} />
-                                        </button>
-                                    </div>
-                                </div>
-                                <div className="contact-list" style={{ flex: 1, overflowY: 'auto', marginTop: '1rem' }}>
-                                    {/* Deduction of unique contacts with normalization (Brazil 9-digit fix) */}
-                                    {(() => {
-                                        // Helper to normalize phone for grouping (Handling Brazil 9-digit issue)
-                                        const normalize = p => {
-                                            let s = String(p || '').replace(/\D/g, '');
-                                            if (s.startsWith('55') && s.length === 12) {
-                                                return s.slice(0, 4) + '9' + s.slice(4);
-                                            }
-                                            return s;
-                                        };
-
-                                        // Group messages by normalized phone
-                                        const groups = {};
-                                        receivedMessages.forEach(m => {
-                                            const key = normalize(m.contactPhone);
-                                            if (!groups[key]) groups[key] = [];
-                                            groups[key].push(m);
-                                        });
-
-                                        return Object.keys(groups).map(phoneKey => {
-                                            const contactMsgs = groups[phoneKey];
-                                            const bestPhone = contactMsgs.find(m => String(m.contactPhone).replace(/\D/g, '').length === 13)?.contactPhone || contactMsgs[0].contactPhone;
-
-                                            const incomingMsg = contactMsgs.find(m => !m.isFromMe);
-                                            const outgoingMsg = contactMsgs.find(m => m.isFromMe);
-                                            // Priority: Outgoing (Nome Fantasia) -> Incoming -> Phone
-                                            const contactName = outgoingMsg ? outgoingMsg.contactName : (incomingMsg ? incomingMsg.contactName : bestPhone);
-
-                                            const hasUnread = contactMsgs.some(m => !m.isFromMe && !m.isRead);
-                                            const isSelected = normalize(activeContact) === phoneKey;
-
-                                            return (
-                                                <div
-                                                    key={phoneKey}
-                                                    className={`contact-item ${isSelected ? 'active' : ''}`}
-                                                    onClick={() => {
-                                                        setActiveContact(bestPhone);
-                                                        // Instant UI update
-                                                        setReceivedMessages(prev => prev.map(m =>
-                                                            (normalize(m.contactPhone) === phoneKey && !m.isFromMe) ? { ...m, isRead: true } : m
-                                                        ));
-
-                                                        // Get all unique raw phones in this group to mark as read
-                                                        const groupPhones = [...new Set(contactMsgs.map(m => m.contactPhone))];
-
-                                                        fetch('/api/messages/mark-read', {
-                                                            method: 'POST',
-                                                            headers: { 'Content-Type': 'application/json' },
-                                                            body: JSON.stringify({ phones: groupPhones })
-                                                        }).catch(err => console.error('Failed to mark as read:', err));
-                                                    }}
-                                                    style={{
-                                                        padding: '12px',
-                                                        borderRadius: '8px',
-                                                        cursor: 'pointer',
-                                                        marginBottom: '8px',
-                                                        border: isSelected ? '2px solid var(--ambev-blue)' : '1px solid #eee',
-                                                        backgroundColor: isSelected ? '#f0f4ff' : 'white',
-                                                        width: '100%',
-                                                        boxSizing: 'border-box'
-                                                    }}
-                                                >
-                                                    <div className="contact-header" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                                        {isDeleting && (
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={selectedContacts.includes(phoneKey)}
-                                                                onClick={(e) => e.stopPropagation()}
-                                                                onChange={(e) => {
-                                                                    if (selectedContacts.includes(phoneKey)) {
-                                                                        setSelectedContacts(prev => prev.filter(p => p !== phoneKey));
-                                                                    } else {
-                                                                        setSelectedContacts(prev => [...prev, phoneKey]);
-                                                                    }
-                                                                }}
-                                                                style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                                                            />
-                                                        )}
-                                                        <div className="contact-name" style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                            <span>{contactName}</span>
-                                                            <span style={{ fontSize: '0.75rem', color: '#ccc' }}>
-                                                                {(() => {
-                                                                    const lastMsg = contactMsgs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
-                                                                    if (!lastMsg || !lastMsg.createdAt) return '';
-                                                                    const date = new Date(lastMsg.createdAt);
-                                                                    if (isNaN(date.getTime())) return '';
-                                                                    const pad = n => String(n).padStart(2, '0');
-                                                                    return `${pad(date.getHours())}:${pad(date.getMinutes())} ${pad(date.getDate())}-${pad(date.getMonth() + 1)}`;
-                                                                })()}
-                                                            </span>
-                                                        </div>
-                                                        {hasUnread && <span className="unread-dot"></span>}
+                                        ) : (
+                                            <>
+                                                <div className="card ambev-flag upload-success" style={{ gridColumn: 'span 2' }}>
+                                                    <CheckCircle2 size={48} color="var(--ambev-green)" />
+                                                    <h3>Base carregada: {campaignData.length} leads</h3>
+                                                    <button className="btn-link" onClick={() => setCampaignData(null)}>Trocar base</button>
+                                                </div>
+                                                <div className="card ambev-flag" style={{ gridColumn: 'span 2', maxHeight: '400px', overflow: 'auto', padding: '1rem' }}>
+                                                    <h3>Preview dos Dados</h3>
+                                                    <table className="preview-table">
+                                                        <thead>
+                                                            <tr>{headers.map(h => <th key={h}>{h}</th>)}</tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {campaignData.slice(0, 10).map((row, i) => (
+                                                                <tr key={i}>
+                                                                    {headers.map(h => <td key={h}>{row[h]}</td>)}
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                    {campaignData.length > 10 && <p style={{ fontSize: '0.8rem', color: '#666', marginTop: '10px' }}>Exibindo os primeiros 10 leads de {campaignData.length}.</p>}
+                                                </div>
+                                            </>
+                                        )}
+                                        {campaignData && (
+                                            <>
+                                                <div className="card ambev-flag mapping-card">
+                                                    <h3>Mapeamento</h3>
+                                                    <div className="mapping-grid">
+                                                        {REQUIRED_COLUMNS.map(col => (
+                                                            <div key={col.id} className="input-group">
+                                                                <label>{col.label}</label>
+                                                                <select value={mapping[col.id] || ''} onChange={e => setMapping({ ...mapping, [col.id]: e.target.value })}>
+                                                                    <option value="">Coluna...</option>
+                                                                    {headers.map(h => <option key={h} value={h}>{h}</option>)}
+                                                                </select>
+                                                            </div>
+                                                        ))}
                                                     </div>
                                                 </div>
-                                            );
-                                        });
-                                    })()}
-                                    {receivedMessages.length === 0 && <p style={{ textAlign: 'center', color: '#999', marginTop: '2rem' }}>Nenhuma mensagem.</p>}
-                                </div>
-                            </div>
+                                                <div className="card ambev-flag template-card">
+                                                    <h3>Tipo de Disparo</h3>
+                                                    <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+                                                        <button
+                                                            className={`mode-btn ${dispatchMode === 'template' ? 'active' : ''}`}
+                                                            onClick={() => setDispatchMode('template')}
+                                                            style={{
+                                                                flex: 1,
+                                                                padding: '12px',
+                                                                border: dispatchMode === 'template' ? '2px solid #280091' : '1px solid #ddd',
+                                                                borderRadius: '8px',
+                                                                background: dispatchMode === 'template' ? '#f0f4ff' : 'white',
+                                                                cursor: 'pointer',
+                                                                fontWeight: dispatchMode === 'template' ? 600 : 400
+                                                            }}
+                                                        >
+                                                            Template único
+                                                        </button>
+                                                        <button
+                                                            className={`mode-btn ${dispatchMode === 'flow' ? 'active' : ''}`}
+                                                            onClick={() => setDispatchMode('flow')}
+                                                            style={{
+                                                                flex: 1,
+                                                                padding: '12px',
+                                                                border: dispatchMode === 'flow' ? '2px solid #280091' : '1px solid #ddd',
+                                                                borderRadius: '8px',
+                                                                background: dispatchMode === 'flow' ? '#f0f4ff' : 'white',
+                                                                cursor: 'pointer',
+                                                                fontWeight: dispatchMode === 'flow' ? 600 : 400
+                                                            }}
+                                                        >
+                                                            Fluxo completo
+                                                        </button>
+                                                    </div>
 
-                            <div className="card ambev-flag chat-view" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0' }}>
-                                {activeContact ? (
-                                    <>
-                                        <header style={{ padding: '1rem', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center' }}>
-                                            <div
-                                                className="profile-avatar"
-                                                onClick={() => {
-                                                    const activeKey = normalize(activeContact);
-                                                    const contactMsgs = receivedMessages.filter(m => normalize(m.contactPhone) === activeKey);
+                                                    {dispatchMode === 'template' ? (
+                                                        <>
+                                                            <div className="input-group"><label>Template Meta</label><input type="text" value={templateName} onChange={e => setTemplateName(e.target.value)} /></div>
+                                                            <div className="input-grid mt-4">
+                                                                <div className="input-group"><label>Data Antiga</label><input type="text" placeholder="12/01" value={dates.old} onChange={e => setDates({ ...dates, old: e.target.value })} /></div>
+                                                                <div className="input-group"><label>Data Nova</label><input type="text" placeholder="13/01" value={dates.new} onChange={e => setDates({ ...dates, new: e.target.value })} /></div>
+                                                            </div>
+                                                            <button className="btn-secondary mt-2" onClick={() => setTemplatePreview(true)}>Validar Template</button>
+                                                            {templatePreview && renderTemplatePreview()}
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <div className="input-group">
+                                                                <label>Selecione o Fluxo</label>
+                                                                <select
+                                                                    value={selectedFlowId || ''}
+                                                                    onChange={e => setSelectedFlowId(e.target.value ? parseInt(e.target.value) : null)}
+                                                                    style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ddd' }}
+                                                                >
+                                                                    <option value="">Escolha um fluxo...</option>
+                                                                    {availableFlows.map(f => (
+                                                                        <option key={f.id} value={f.id}>{f.name}</option>
+                                                                    ))}
+                                                                </select>
+                                                            </div>
+                                                            <p style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
+                                                                Ao disparar um fluxo, cada contato entrará no fluxo e receberá as mensagens conforme o fluxo definido.
+                                                            </p>
+                                                        </>
+                                                    )}
+                                                </div>
+                                                <div className="dispatch-actions" style={{ gridColumn: 'span 2' }}>
+                                                    {dispatchMode === 'template' ? (
+                                                        <button className="btn-primary btn-lg" onClick={startDispatch}><Send size={24} /> Disparar Template</button>
+                                                    ) : (
+                                                        <button
+                                                            className="btn-primary btn-lg"
+                                                            onClick={async () => {
+                                                                if (!selectedFlowId) {
+                                                                    addToast('Selecione um fluxo!', 'error');
+                                                                    return;
+                                                                }
+                                                                if (!campaignData || campaignData.length === 0) {
+                                                                    addToast('Carregue os leads primeiro!', 'error');
+                                                                    return;
+                                                                }
+                                                                const phoneColumn = mapping.phone;
+                                                                if (!phoneColumn) {
+                                                                    addToast('Mapeie a coluna de telefone!', 'error');
+                                                                    return;
+                                                                }
+                                                                const phones = campaignData.map(row => row[phoneColumn]).filter(p => p);
+                                                                try {
+                                                                    const res = await fetch(`/api/flows/${selectedFlowId}/start`, {
+                                                                        method: 'POST',
+                                                                        headers: { 'Content-Type': 'application/json' },
+                                                                        body: JSON.stringify({ phones })
+                                                                    });
+                                                                    const data = await res.json();
+                                                                    if (res.ok && data.success) {
+                                                                        addToast(`Fluxo iniciado para ${data.count} contatos!`, 'success');
+                                                                    } else {
+                                                                        addToast(data.error || 'Erro ao iniciar fluxo.', 'error');
+                                                                    }
+                                                                } catch (err) {
+                                                                    addToast('Erro de conexão.', 'error');
+                                                                }
+                                                            }}
+                                                            disabled={!selectedFlowId}
+                                                            style={{ opacity: selectedFlowId ? 1 : 0.5 }}
+                                                        >
+                                                            <GitBranch size={24} /> Iniciar Fluxo
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </>
+                                        )}
+                                    </>
+                                )}
+                            </section>
+                        )}
+
+                        {activeTab === 'recebidas' && (
+                            <div className="card ambev-flag fade-in">
+                                <div className="card-header" style={{ marginBottom: '1rem' }}>
+                                    {/* Refresh button moved to Chat Header */}
+                                </div>
+                                <div className="received-container" style={{ display: 'flex', gap: '20px', height: 'calc(100vh - 280px)' }}>
+                                    <div className="card ambev-flag" style={{ width: '300px', flexShrink: 0, display: 'flex', flexDirection: 'column', padding: '1rem' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <h3>Contatos</h3>
+                                            <div style={{ display: 'flex', gap: '8px' }}>
+                                                <button
+                                                    onClick={async (e) => {
+                                                        e.stopPropagation();
+                                                        if (isDeleting && selectedContacts.length > 0) {
+                                                            setShowDeleteConfirm(true);
+                                                        } else {
+                                                            setIsDeleting(!isDeleting);
+                                                            setSelectedContacts([]);
+                                                        }
+                                                    }}
+                                                    title={isDeleting ? "Confirmar Exclusão" : "Excluir Conversas"}
+                                                    style={{ padding: '4px', border: 'none', background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: isDeleting ? 'red' : '#999' }}
+                                                >
+                                                    <Trash2 size={18} />
+                                                </button>
+                                                <button
+                                                    className={`refresh-btn ${isRefreshing ? 'spinning' : ''}`}
+                                                    onClick={fetchMessages}
+                                                    title="Atualizar mensagens"
+                                                    disabled={isRefreshing}
+                                                    style={{ padding: '4px', border: 'none', background: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ambev-blue)' }}
+                                                >
+                                                    <RefreshCw size={18} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div className="contact-list" style={{ flex: 1, overflowY: 'auto', marginTop: '1rem' }}>
+                                            {/* Deduction of unique contacts with normalization (Brazil 9-digit fix) */}
+                                            {(() => {
+                                                // Helper to normalize phone for grouping (Handling Brazil 9-digit issue)
+                                                const normalize = p => {
+                                                    let s = String(p || '').replace(/\D/g, '');
+                                                    if (s.startsWith('55') && s.length === 12) {
+                                                        return s.slice(0, 4) + '9' + s.slice(4);
+                                                    }
+                                                    return s;
+                                                };
+
+                                                // Group messages by normalized phone
+                                                const groups = {};
+                                                receivedMessages.forEach(m => {
+                                                    const key = normalize(m.contactPhone);
+                                                    if (!groups[key]) groups[key] = [];
+                                                    groups[key].push(m);
+                                                });
+
+                                                return Object.keys(groups).map(phoneKey => {
+                                                    const contactMsgs = groups[phoneKey];
+                                                    const bestPhone = contactMsgs.find(m => String(m.contactPhone).replace(/\D/g, '').length === 13)?.contactPhone || contactMsgs[0].contactPhone;
 
                                                     const incomingMsg = contactMsgs.find(m => !m.isFromMe);
                                                     const outgoingMsg = contactMsgs.find(m => m.isFromMe);
-                                                    const clientName = incomingMsg ? incomingMsg.contactName : (outgoingMsg ? outgoingMsg.contactName : activeContact);
+                                                    // Priority: Outgoing (Nome Fantasia) -> Incoming -> Phone
+                                                    const contactName = outgoingMsg ? outgoingMsg.contactName : (incomingMsg ? incomingMsg.contactName : bestPhone);
 
-                                                    setShowProfileModal({
-                                                        name: clientName,
-                                                        phone: activeContact
-                                                    });
-                                                }}
-                                            >
-                                                <img
-                                                    src={`/api/contacts/${activeContact}/photo?name=${encodeURIComponent(
-                                                        (() => {
-                                                            const normalize = p => {
-                                                                let s = String(p).replace(/\D/g, '');
-                                                                if (s.startsWith('55') && s.length === 12) return s.slice(0, 4) + '9' + s.slice(4);
-                                                                return s;
-                                                            };
+                                                    const hasUnread = contactMsgs.some(m => !m.isFromMe && !m.isRead);
+                                                    const isSelected = normalize(activeContact) === phoneKey;
+
+                                                    return (
+                                                        <div
+                                                            key={phoneKey}
+                                                            className={`contact-item ${isSelected ? 'active' : ''}`}
+                                                            onClick={() => {
+                                                                setActiveContact(bestPhone);
+                                                                // Instant UI update
+                                                                setReceivedMessages(prev => prev.map(m =>
+                                                                    (normalize(m.contactPhone) === phoneKey && !m.isFromMe) ? { ...m, isRead: true } : m
+                                                                ));
+
+                                                                // Get all unique raw phones in this group to mark as read
+                                                                const groupPhones = [...new Set(contactMsgs.map(m => m.contactPhone))];
+
+                                                                fetch('/api/messages/mark-read', {
+                                                                    method: 'POST',
+                                                                    headers: { 'Content-Type': 'application/json' },
+                                                                    body: JSON.stringify({ phones: groupPhones })
+                                                                }).catch(err => console.error('Failed to mark as read:', err));
+                                                            }}
+                                                            style={{
+                                                                padding: '12px',
+                                                                borderRadius: '8px',
+                                                                cursor: 'pointer',
+                                                                marginBottom: '8px',
+                                                                border: isSelected ? '2px solid var(--ambev-blue)' : '1px solid #eee',
+                                                                backgroundColor: isSelected ? '#f0f4ff' : 'white',
+                                                                width: '100%',
+                                                                boxSizing: 'border-box'
+                                                            }}
+                                                        >
+                                                            <div className="contact-header" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                                {isDeleting && (
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={selectedContacts.includes(phoneKey)}
+                                                                        onClick={(e) => e.stopPropagation()}
+                                                                        onChange={(e) => {
+                                                                            if (selectedContacts.includes(phoneKey)) {
+                                                                                setSelectedContacts(prev => prev.filter(p => p !== phoneKey));
+                                                                            } else {
+                                                                                setSelectedContacts(prev => [...prev, phoneKey]);
+                                                                            }
+                                                                        }}
+                                                                        style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                                                                    />
+                                                                )}
+                                                                <div className="contact-name" style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                                    <span>{contactName}</span>
+                                                                    <span style={{ fontSize: '0.75rem', color: '#ccc' }}>
+                                                                        {(() => {
+                                                                            const lastMsg = contactMsgs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+                                                                            if (!lastMsg || !lastMsg.createdAt) return '';
+                                                                            const date = new Date(lastMsg.createdAt);
+                                                                            if (isNaN(date.getTime())) return '';
+                                                                            const pad = n => String(n).padStart(2, '0');
+                                                                            return `${pad(date.getHours())}:${pad(date.getMinutes())} ${pad(date.getDate())}-${pad(date.getMonth() + 1)}`;
+                                                                        })()}
+                                                                    </span>
+                                                                </div>
+                                                                {hasUnread && <span className="unread-dot"></span>}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                });
+                                            })()}
+                                            {receivedMessages.length === 0 && <p style={{ textAlign: 'center', color: '#999', marginTop: '2rem' }}>Nenhuma mensagem.</p>}
+                                        </div>
+                                    </div>
+
+                                    <div className="card ambev-flag chat-view" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0' }}>
+                                        {activeContact ? (
+                                            <>
+                                                <header style={{ padding: '1rem', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center' }}>
+                                                    <div
+                                                        className="profile-avatar"
+                                                        onClick={() => {
                                                             const activeKey = normalize(activeContact);
                                                             const contactMsgs = receivedMessages.filter(m => normalize(m.contactPhone) === activeKey);
+
                                                             const incomingMsg = contactMsgs.find(m => !m.isFromMe);
                                                             const outgoingMsg = contactMsgs.find(m => m.isFromMe);
-                                                            return outgoingMsg ? outgoingMsg.contactName : (incomingMsg ? incomingMsg.contactName : activeContact);
-                                                        })()
-                                                    )}`}
-                                                    alt="Avatar"
-                                                />
-                                            </div>
-                                            <div style={{ flex: 1 }}>
-                                                <div style={{ fontWeight: 700 }}>
+                                                            const clientName = incomingMsg ? incomingMsg.contactName : (outgoingMsg ? outgoingMsg.contactName : activeContact);
+
+                                                            setShowProfileModal({
+                                                                name: clientName,
+                                                                phone: activeContact
+                                                            });
+                                                        }}
+                                                    >
+                                                        <img
+                                                            src={`/api/contacts/${activeContact}/photo?name=${encodeURIComponent(
+                                                                (() => {
+                                                                    const normalize = p => {
+                                                                        let s = String(p).replace(/\D/g, '');
+                                                                        if (s.startsWith('55') && s.length === 12) return s.slice(0, 4) + '9' + s.slice(4);
+                                                                        return s;
+                                                                    };
+                                                                    const activeKey = normalize(activeContact);
+                                                                    const contactMsgs = receivedMessages.filter(m => normalize(m.contactPhone) === activeKey);
+                                                                    const incomingMsg = contactMsgs.find(m => !m.isFromMe);
+                                                                    const outgoingMsg = contactMsgs.find(m => m.isFromMe);
+                                                                    return outgoingMsg ? outgoingMsg.contactName : (incomingMsg ? incomingMsg.contactName : activeContact);
+                                                                })()
+                                                            )}`}
+                                                            alt="Avatar"
+                                                        />
+                                                    </div>
+                                                    <div style={{ flex: 1 }}>
+                                                        <div style={{ fontWeight: 700 }}>
+                                                            {(() => {
+                                                                const normalize = p => {
+                                                                    let s = String(p).replace(/\D/g, '');
+                                                                    if (s.startsWith('55') && s.length === 12) return s.slice(0, 4) + '9' + s.slice(4);
+                                                                    return s;
+                                                                };
+                                                                const activeKey = normalize(activeContact);
+                                                                const contactMsgs = receivedMessages.filter(m => normalize(m.contactPhone) === activeKey);
+                                                                const incomingMsg = contactMsgs.find(m => !m.isFromMe);
+                                                                const outgoingMsg = contactMsgs.find(m => m.isFromMe);
+                                                                return outgoingMsg ? outgoingMsg.contactName : (incomingMsg ? incomingMsg.contactName : activeContact);
+                                                            })()}
+                                                        </div>
+                                                        <div style={{ fontSize: '0.8rem', color: '#666' }}>{activeContact}</div>
+                                                    </div>
+                                                </header>
+                                                <div className="chat-messages" style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column-reverse' }}>
                                                     {(() => {
                                                         const normalize = p => {
                                                             let s = String(p).replace(/\D/g, '');
@@ -1077,144 +1420,134 @@ function Dashboard({
                                                             return s;
                                                         };
                                                         const activeKey = normalize(activeContact);
-                                                        const contactMsgs = receivedMessages.filter(m => normalize(m.contactPhone) === activeKey);
-                                                        const incomingMsg = contactMsgs.find(m => !m.isFromMe);
-                                                        const outgoingMsg = contactMsgs.find(m => m.isFromMe);
-                                                        return outgoingMsg ? outgoingMsg.contactName : (incomingMsg ? incomingMsg.contactName : activeContact);
+                                                        return receivedMessages
+                                                            .filter(m => normalize(m.contactPhone) === activeKey)
+                                                            .map(msg => (
+                                                                <div key={msg.id} style={{
+                                                                    alignSelf: msg.isFromMe ? 'flex-end' : 'flex-start',
+                                                                    backgroundColor: msg.isFromMe ? 'var(--ambev-blue)' : '#f0f2f5',
+                                                                    color: msg.isFromMe ? 'white' : 'black',
+                                                                    padding: '10px 14px',
+                                                                    borderRadius: '12px',
+                                                                    maxWidth: '80%',
+                                                                    marginBottom: '10px',
+                                                                    position: 'relative',
+                                                                    fontSize: '0.9rem'
+                                                                }}>
+                                                                    {msg.messageBody}
+                                                                    <div style={{ fontSize: '0.65rem', opacity: 0.7, marginTop: '4px', textAlign: 'right' }}>
+                                                                        {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                                    </div>
+                                                                </div>
+                                                            ));
                                                     })()}
                                                 </div>
-                                                <div style={{ fontSize: '0.8rem', color: '#666' }}>{activeContact}</div>
+                                                <form
+                                                    style={{ padding: '1rem', borderTop: '1px solid #eee', display: 'flex', gap: '10px' }}
+                                                    onSubmit={async (e) => {
+                                                        e.preventDefault();
+                                                        const text = e.target.reply.value;
+                                                        if (!text) return;
+                                                        try {
+                                                            const res = await fetch('/api/send-message', {
+                                                                method: 'POST',
+                                                                headers: { 'Content-Type': 'application/json' },
+                                                                body: JSON.stringify({ userId: user.id, phone: activeContact, text })
+                                                            });
+                                                            if (res.ok) {
+                                                                e.target.reply.value = '';
+                                                                addToast('Mensagem enviada!', 'success');
+                                                                fetchMessages();
+                                                            } else {
+                                                                addToast('Erro ao enviar resposta.', 'error');
+                                                            }
+                                                        } catch (err) { addToast('Erro de conexão.', 'error'); }
+                                                    }}
+                                                >
+                                                    <input name="reply" type="text" placeholder="Digite uma resposta..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid #ddd' }} />
+                                                    <button type="submit" className="btn-icon" style={{ backgroundColor: 'var(--ambev-blue)', color: 'white', borderRadius: '50%', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                        <Send size={20} />
+                                                    </button>
+                                                </form>
+                                            </>
+                                        ) : (
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999', flexDirection: 'column' }}>
+                                                <AlertCircle size={48} strokeWidth={1} style={{ marginBottom: '1rem' }} />
+                                                Selecione um contato para ver as mensagens
                                             </div>
-                                        </header>
-                                        <div className="chat-messages" style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column-reverse' }}>
-                                            {(() => {
-                                                const normalize = p => {
-                                                    let s = String(p).replace(/\D/g, '');
-                                                    if (s.startsWith('55') && s.length === 12) return s.slice(0, 4) + '9' + s.slice(4);
-                                                    return s;
-                                                };
-                                                const activeKey = normalize(activeContact);
-                                                return receivedMessages
-                                                    .filter(m => normalize(m.contactPhone) === activeKey)
-                                                    .map(msg => (
-                                                        <div key={msg.id} style={{
-                                                            alignSelf: msg.isFromMe ? 'flex-end' : 'flex-start',
-                                                            backgroundColor: msg.isFromMe ? 'var(--ambev-blue)' : '#f0f2f5',
-                                                            color: msg.isFromMe ? 'white' : 'black',
-                                                            padding: '10px 14px',
-                                                            borderRadius: '12px',
-                                                            maxWidth: '80%',
-                                                            marginBottom: '10px',
-                                                            position: 'relative',
-                                                            fontSize: '0.9rem'
-                                                        }}>
-                                                            {msg.messageBody}
-                                                            <div style={{ fontSize: '0.65rem', opacity: 0.7, marginTop: '4px', textAlign: 'right' }}>
-                                                                {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                            </div>
-                                                        </div>
-                                                    ));
-                                            })()}
-                                        </div>
-                                        <form
-                                            style={{ padding: '1rem', borderTop: '1px solid #eee', display: 'flex', gap: '10px' }}
-                                            onSubmit={async (e) => {
-                                                e.preventDefault();
-                                                const text = e.target.reply.value;
-                                                if (!text) return;
-                                                try {
-                                                    const res = await fetch('/api/send-message', {
-                                                        method: 'POST',
-                                                        headers: { 'Content-Type': 'application/json' },
-                                                        body: JSON.stringify({ userId: user.id, phone: activeContact, text })
-                                                    });
-                                                    if (res.ok) {
-                                                        e.target.reply.value = '';
-                                                        addToast('Mensagem enviada!', 'success');
-                                                        fetchMessages();
-                                                    } else {
-                                                        addToast('Erro ao enviar resposta.', 'error');
-                                                    }
-                                                } catch (err) { addToast('Erro de conexão.', 'error'); }
-                                            }}
-                                        >
-                                            <input name="reply" type="text" placeholder="Digite uma resposta..." style={{ flex: 1, padding: '10px', borderRadius: '20px', border: '1px solid #ddd' }} />
-                                            <button type="submit" className="btn-icon" style={{ backgroundColor: 'var(--ambev-blue)', color: 'white', borderRadius: '50%', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                <Send size={20} />
-                                            </button>
-                                        </form>
-                                    </>
-                                ) : (
-                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999', flexDirection: 'column' }}>
-                                        <AlertCircle size={48} strokeWidth={1} style={{ marginBottom: '1rem' }} />
-                                        Selecione um contato para ver as mensagens
+                                        )}
                                     </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {activeTab === 'historico' && (
-                    <div className="card ambev-flag" style={{ width: '100%', boxSizing: 'border-box', maxWidth: '100%' }}>
-                        <h3>Camppanhas Recentes</h3>
-                        <div style={{ overflowX: 'auto' }}>
-                            <table className="preview-table">
-                                <thead>
-                                    <tr>
-                                        <th>ID</th>
-                                        <th>Data</th>
-                                        <th>Total</th>
-                                        <th>Sucesso</th>
-                                        <th>Erros</th>
-                                        <th>Status</th>
-                                        <th>Ação</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {dispatches.map(d => (
-                                        <tr key={d.id}>
-                                            <td>#{d.id}</td>
-                                            <td style={{ fontSize: '0.8rem' }}>{new Date(d.createdAt).toLocaleString()}</td>
-                                            <td>{d.totalLeads}</td>
-                                            <td style={{ color: 'var(--ambev-green)' }}>{d.successCount}</td>
-                                            <td style={{ color: d.errorCount > 0 ? '#ff5555' : 'inherit' }}>{d.errorCount}</td>
-                                            <td><span className={`status-badge ${d.status}`}>{d.status}</span></td>
-                                            <td style={{ display: 'flex', gap: '8px' }}>
-                                                <button className="btn-icon" onClick={() => setSelectedLogDispatch(d)} title="Ver Logs"><List size={18} /></button>
-                                                {d.errorCount > 0 && d.status !== 'running' && (
-                                                    <button className="btn-icon" onClick={() => retryFailed(d.id)} title="Reintentar Erros" style={{ color: 'var(--ambev-blue)' }}><RotateCcw size={18} /></button>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
-
-                {activeTab === 'ajustes' && (
-                    <div className="card ambev-flag">
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <h3>Credenciais</h3>
-                            <button className="btn-secondary" onClick={() => setIsEditing(!isEditing)}>{isEditing ? 'Cancelar' : 'Editar'}</button>
-                        </div>
-                        <div className="input-grid mt-4">
-                            <div className="input-group">
-                                <label>Token</label>
-                                <div className="input-with-btn">
-                                    <input type={showToken ? "text" : "password"} value={isEditing ? tempConfig.token : config.token} onChange={e => setTempConfig({ ...tempConfig, token: e.target.value })} disabled={!isEditing} />
-                                    <button onClick={() => setShowToken(!showToken)}>{showToken ? <EyeOff size={18} /> : <Eye size={18} />}</button>
                                 </div>
                             </div>
-                            <div className="input-row">
-                                <div className="input-group"><label>Phone ID</label><input type="text" value={isEditing ? tempConfig.phoneId : config.phoneId} onChange={e => setTempConfig({ ...tempConfig, phoneId: e.target.value })} disabled={!isEditing} /></div>
-                                <div className="input-group"><label>WABA ID</label><input type="text" value={isEditing ? tempConfig.wabaId : config.wabaId} onChange={e => setTempConfig({ ...tempConfig, wabaId: e.target.value })} disabled={!isEditing} /></div>
+                        )}
+
+                        {activeTab === 'historico' && (
+                            <div className="history-container" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                                <div className="card ambev-flag" style={{ width: '100%', boxSizing: 'border-box', maxWidth: '100%' }}>
+                                    <h3>Campanhas de Disparo</h3>
+                                    <div style={{ overflowX: 'auto' }}>
+                                        <table className="preview-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>ID</th>
+                                                    <th>Data</th>
+                                                    <th>Total</th>
+                                                    <th>Sucesso</th>
+                                                    <th>Erros</th>
+                                                    <th>Status</th>
+                                                    <th>Ação</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {dispatches.map(d => (
+                                                    <tr key={d.id}>
+                                                        <td>#{d.id}</td>
+                                                        <td style={{ fontSize: '0.8rem' }}>{new Date(d.createdAt).toLocaleString()}</td>
+                                                        <td>{d.totalLeads}</td>
+                                                        <td style={{ color: 'var(--ambev-green)' }}>{d.successCount}</td>
+                                                        <td style={{ color: d.errorCount > 0 ? '#ff5555' : 'inherit' }}>{d.errorCount}</td>
+                                                        <td><span className={`status-badge ${d.status}`}>{d.status}</span></td>
+                                                        <td style={{ display: 'flex', gap: '8px' }}>
+                                                            <button className="btn-icon" onClick={() => setSelectedLogDispatch(d)} title="Ver Logs"><List size={18} /></button>
+                                                            {d.errorCount > 0 && d.status !== 'running' && (
+                                                                <button className="btn-icon" onClick={() => retryFailed(d.id)} title="Reintentar Erros" style={{ color: 'var(--ambev-blue)' }}><RotateCcw size={18} /></button>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {dispatches.length === 0 && <tr><td colSpan="7" style={{ textAlign: 'center', color: '#999' }}>Nenhuma campanha encontrada.</td></tr>}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <FlowSessionsHistory userId={user.id} />
                             </div>
-                            {isEditing && <button className="btn-primary w-full mt-4" onClick={saveConfig}>Salvar</button>}
-                        </div>
-                    </div>
+                        )}
+
+                        {activeTab === 'ajustes' && (
+                            <div className="card ambev-flag">
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <h3>Credenciais</h3>
+                                    <button className="btn-secondary" onClick={() => setIsEditing(!isEditing)}>{isEditing ? 'Cancelar' : 'Editar'}</button>
+                                </div>
+                                <div className="input-grid mt-4">
+                                    <div className="input-group">
+                                        <label>Token</label>
+                                        <div className="input-with-btn">
+                                            <input type={showToken ? "text" : "password"} value={isEditing ? tempConfig.token : config.token} onChange={e => setTempConfig({ ...tempConfig, token: e.target.value })} disabled={!isEditing} />
+                                            <button onClick={() => setShowToken(!showToken)}>{showToken ? <EyeOff size={18} /> : <Eye size={18} />}</button>
+                                        </div>
+                                    </div>
+                                    <div className="input-row">
+                                        <div className="input-group"><label>Phone ID</label><input type="text" value={isEditing ? tempConfig.phoneId : config.phoneId} onChange={e => setTempConfig({ ...tempConfig, phoneId: e.target.value })} disabled={!isEditing} /></div>
+                                        <div className="input-group"><label>WABA ID</label><input type="text" value={isEditing ? tempConfig.wabaId : config.wabaId} onChange={e => setTempConfig({ ...tempConfig, wabaId: e.target.value })} disabled={!isEditing} /></div>
+                                    </div>
+                                    {isEditing && <button className="btn-primary w-full mt-4" onClick={saveConfig}>Salvar</button>}
+                                </div>
+                            </div>
+                        )}
+                    </>
                 )}
             </main>
 

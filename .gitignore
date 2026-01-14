@@ -4,3 +4,4 @@ dist/
 *.sqlite
 *.zip
 .DS_Store
+uploads/

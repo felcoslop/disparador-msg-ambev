@@ -3,13 +3,31 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { PrismaClient } from '@prisma/client';
+import multer from 'multer';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Multer configuration for image uploads
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadsDir),
+    filename: (req, file, cb) => {
+        const uniqueName = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}${path.extname(file.originalname)}`;
+        cb(null, uniqueName);
+    }
+});
+const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
 
 const app = express();
 const server = createServer(app);
@@ -795,6 +813,486 @@ app.post('/api/send-message', async (req, res) => {
     }
 });
 
+// --- FLOWS ROUTES ---
+
+// Get all flows for user
+app.get('/api/flows/:userId', async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const flows = await prisma.flow.findMany({
+            where: { userId },
+            orderBy: { updatedAt: 'desc' }
+        });
+        res.json(flows);
+    } catch (err) {
+        console.error('[GET FLOWS ERROR]', err);
+        res.status(500).json({ error: 'Erro ao buscar fluxos' });
+    }
+});
+
+// Get specific flow
+app.get('/api/flows/:userId/:flowId', async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const flowId = parseInt(req.params.flowId);
+        const flow = await prisma.flow.findFirst({
+            where: { id: flowId, userId }
+        });
+        if (!flow) return res.status(404).json({ error: 'Fluxo não encontrado' });
+        res.json(flow);
+    } catch (err) {
+        res.status(500).json({ error: 'Erro ao buscar fluxo' });
+    }
+});
+
+// Create flow
+app.post('/api/flows/:userId', async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const { name, nodes, edges } = req.body;
+        const flow = await prisma.flow.create({
+            data: {
+                userId,
+                name,
+                nodes: JSON.stringify(nodes || []),
+                edges: JSON.stringify(edges || [])
+            }
+        });
+        res.json({ success: true, flow });
+    } catch (err) {
+        res.status(500).json({ error: 'Erro ao criar fluxo' });
+    }
+});
+
+// Update flow
+app.put('/api/flows/:userId/:flowId', async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const flowId = parseInt(req.params.flowId);
+        const { name, nodes, edges } = req.body;
+
+        const flow = await prisma.flow.updateMany({
+            where: { id: flowId, userId },
+            data: {
+                name,
+                nodes: JSON.stringify(nodes),
+                edges: JSON.stringify(edges)
+            }
+        });
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Erro ao atualizar fluxo' });
+    }
+});
+
+// Delete flow
+app.delete('/api/flows/:userId/:flowId', async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const flowId = parseInt(req.params.flowId);
+        await prisma.flow.deleteMany({
+            where: { id: flowId, userId }
+        });
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Erro ao excluir fluxo' });
+    }
+});
+
+// Start flow for contacts
+app.post('/api/flows/:flowId/start', async (req, res) => {
+    try {
+        const flowId = parseInt(req.params.flowId);
+        const { phones } = req.body; // Array of phone numbers
+
+        const flow = await prisma.flow.findUnique({
+            where: { id: flowId },
+            include: { user: { include: { config: true } } }
+        });
+
+        if (!flow) return res.status(404).json({ error: 'Fluxo não encontrado' });
+
+        const nodes = JSON.parse(flow.nodes);
+        const startNode = nodes.find(n => n.type === 'start' || n.data?.isStart);
+        // Assuming first node or specific start node. 
+        // If not explicit, take the first one or the one with no incoming edges (simplified: first in array for now or specifically 'start' type if we make one)
+        // Let's assume user connects from a "Start" node or we pick the first message node.
+
+        // Better strategy: Find node with no target handles connected? 
+        // For simplicity, we'll assume the user design starts with a specific node or we take the first MessageNode.
+        // Let's rely on a helper to find start node.
+        const initialNodeId = nodes[0]?.id; // Simplest start
+
+        if (!initialNodeId) return res.status(400).json({ error: 'Fluxo vazio' });
+
+        let count = 0;
+        for (let phone of phones) {
+            let normalized = String(phone).replace(/\D/g, '');
+            if (!normalized.startsWith('55')) normalized = '55' + normalized;
+
+            // Create or update session
+            // We terminate old session if exists
+            await prisma.flowSession.deleteMany({
+                where: { contactPhone: normalized } // Ensure only one active session per phone globally? Or per flow? Per phone usually.
+            });
+
+            const session = await prisma.flowSession.create({
+                data: {
+                    flowId,
+                    contactPhone: normalized,
+                    currentStep: initialNodeId,
+                    status: 'active',
+                    variables: '{}'
+                }
+            });
+
+            // Trigger first step execution immediately
+            await FlowEngine.executeStep(session, flow, flow.user.config);
+            count++;
+        }
+
+        res.json({ success: true, count });
+    } catch (err) {
+        console.error('[START FLOW ERROR]', err);
+        res.status(500).json({ error: 'Erro ao iniciar fluxo' });
+    }
+});
+
+// Get flow sessions for history
+app.get('/api/flow-sessions/:userId', async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+
+        // Get all flows for this user
+        const flows = await prisma.flow.findMany({
+            where: { userId },
+            select: { id: true, name: true, nodes: true }
+        });
+
+        const flowIds = flows.map(f => f.id);
+
+        // Get all sessions for these flows
+        const sessions = await prisma.flowSession.findMany({
+            where: { flowId: { in: flowIds } },
+            orderBy: { updatedAt: 'desc' },
+            take: 100
+        });
+
+        // Enrich sessions with flow name and current step name
+        const enrichedSessions = sessions.map(session => {
+            const flow = flows.find(f => f.id === session.flowId);
+            let currentStepName = 'Desconhecido';
+
+            if (flow && session.currentStep) {
+                try {
+                    const nodes = JSON.parse(flow.nodes);
+                    const node = nodes.find(n => n.id === session.currentStep);
+                    if (node) {
+                        currentStepName = node.data?.label || node.data?.templateName || `Nó ${node.id}`;
+                    }
+                } catch (e) { }
+            }
+
+            return {
+                ...session,
+                flowName: flow?.name || 'Fluxo removido',
+                currentStepName
+            };
+        });
+
+        res.json(enrichedSessions);
+    } catch (err) {
+        console.error('[GET FLOW SESSIONS ERROR]', err);
+        res.status(500).json({ error: 'Erro ao buscar sessões' });
+    }
+});
+
+// Get logs for a specific flow session
+app.get('/api/flow-session-logs/:sessionId', async (req, res) => {
+    try {
+        const sessionId = parseInt(req.params.sessionId);
+
+        const logs = await prisma.flowSessionLog.findMany({
+            where: { sessionId },
+            orderBy: { createdAt: 'asc' }
+        });
+
+        res.json(logs);
+    } catch (err) {
+        console.error('[GET SESSION LOGS ERROR]', err);
+        res.status(500).json({ error: 'Erro ao buscar logs' });
+    }
+});
+
+// --- FLOW ENGINE LOGIC ---
+const FlowEngine = {
+    async logAction(sessionId, nodeId, nodeName, action, details) {
+        try {
+            await prisma.flowSessionLog.create({
+                data: { sessionId, nodeId, nodeName, action, details }
+            });
+        } catch (e) {
+            console.error('[FLOW LOG ERROR]', e);
+        }
+    },
+
+    async executeStep(session, flow, config) {
+        try {
+            const nodes = JSON.parse(flow.nodes);
+            const edges = JSON.parse(flow.edges);
+            const currentNode = nodes.find(n => n.id === session.currentStep);
+
+            if (!currentNode) {
+                console.log(`[FLOW] Node ${session.currentStep} not found. Ending session.`);
+                await this.logAction(session.id, session.currentStep, null, 'error', 'Nó não encontrado no fluxo');
+                await this.endSession(session.id, 'Fluxo concluído - nó não encontrado');
+                return;
+            }
+
+            const nodeName = currentNode.data?.label || currentNode.data?.templateName || `Nó ${currentNode.id}`;
+            console.log(`[FLOW] Executing node ${currentNode.id} (${currentNode.type}) for ${session.contactPhone}`);
+
+            // Handle Node Logic based on Type
+            if (currentNode.type === 'templateNode') {
+                const templateName = currentNode.data.templateName;
+                const variables = currentNode.data.params || [];
+                if (templateName) {
+                    const result = await sendWhatsApp(session.contactPhone, config, templateName, variables);
+                    await this.logAction(session.id, currentNode.id, nodeName, 'sent_message', `Template: ${templateName}`);
+                }
+            } else if (currentNode.type === 'imageNode') {
+                const imageUrl = currentNode.data.imageUrl;
+                if (imageUrl) {
+                    await this.sendWhatsAppImage(session.contactPhone, imageUrl, config);
+                    await this.logAction(session.id, currentNode.id, nodeName, 'sent_message', `Imagem: ${imageUrl}`);
+                }
+            } else if (currentNode.type === 'messageNode' || currentNode.type === 'optionsNode' || !currentNode.type) {
+                const messageText = currentNode.data.label || currentNode.data.message || '';
+                if (messageText) {
+                    await this.sendWhatsAppText(session.contactPhone, messageText, config);
+                    await this.logAction(session.id, currentNode.id, nodeName, 'sent_message', messageText.substring(0, 100));
+                }
+            }
+
+            // Determine next state
+            const outboundEdges = edges.filter(e => e.source === currentNode.id);
+
+            // Check for specific handles that imply waiting for reply
+            const hasOptions = outboundEdges.some(e => e.sourceHandle?.startsWith('source-') && e.sourceHandle !== 'source-gray');
+
+            if (hasOptions || currentNode.data?.waitForReply) {
+                await prisma.flowSession.update({
+                    where: { id: session.id },
+                    data: { status: 'waiting_reply' }
+                });
+                await this.logAction(session.id, currentNode.id, nodeName, 'waiting_reply', 'Aguardando resposta do cliente');
+            } else {
+                // "Gray" or default path -> Move immediately
+                const nextEdge = outboundEdges.find(e => e.sourceHandle === 'source-gray' || !e.sourceHandle);
+                if (nextEdge) {
+                    await prisma.flowSession.update({
+                        where: { id: session.id },
+                        data: { currentStep: nextEdge.target }
+                    });
+                    // Recursive call for next step
+                    setTimeout(() => this.executeStep({ ...session, currentStep: nextEdge.target }, flow, config), 1000);
+                } else {
+                    await this.endSession(session.id, 'Fluxo concluído com sucesso');
+                }
+            }
+        } catch (err) {
+            console.error('[FLOW EXECUTION ERROR]', err);
+            await this.logAction(session.id, session.currentStep, null, 'error', err.message);
+        }
+    },
+
+    async sendWhatsAppImage(phone, imageUrl, config) {
+        const url = `https://graph.facebook.com/v20.0/${config.phoneId}/messages`;
+
+        // Ensure URL is absolute for Meta
+        let fullImageUrl = imageUrl;
+        if (imageUrl.startsWith('/uploads/')) {
+            // Using a placeholder or trying to guess the host. 
+            // Better: just use what's provided (user should provide public URL or we need to know server URL)
+            // But let's assume it's external or correctly formatted.
+        }
+
+        const payload = {
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: phone,
+            type: "image",
+            image: { link: fullImageUrl }
+        };
+
+        try {
+            await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${config.token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+        } catch (e) {
+            console.error('[FLOW IMAGE SEND ERROR]', e);
+        }
+    },
+
+    async processMessage(contactPhone, messageBody) {
+        // Normalize phone number (remove DDI if needed or ensure format)
+        let normalizedPhone = String(contactPhone).replace(/\D/g, '');
+        if (!normalizedPhone.startsWith('55')) {
+            normalizedPhone = '55' + normalizedPhone;
+        }
+
+        console.log(`[FLOW] Processing response from ${normalizedPhone}: "${messageBody}"`);
+
+        // Find active session
+        const session = await prisma.flowSession.findFirst({
+            where: {
+                contactPhone: {
+                    in: [normalizedPhone, normalizedPhone.replace('55', '')]
+                },
+                status: 'waiting_reply'
+            },
+            include: { flow: { include: { user: { include: { config: true } } } } }
+        });
+
+        if (!session) {
+            console.log(`[FLOW] No active session found for ${normalizedPhone}`);
+            return;
+        }
+
+        const flow = session.flow;
+        const config = flow.user.config;
+        const nodes = JSON.parse(flow.nodes);
+        const edges = JSON.parse(flow.edges);
+        const currentNode = nodes.find(n => n.id === session.currentStep);
+
+        if (!currentNode) {
+            console.error(`[FLOW] Current step ${session.currentStep} not found in nodes.`);
+            return;
+        }
+
+        const nodeName = currentNode.data?.label || currentNode.data?.templateName || `Nó ${currentNode.id}`;
+
+        // Validation Logic
+        let nextNodeId = null;
+        let isValid = true;
+
+        const outboundEdges = edges.filter(e => e.source === currentNode.id);
+
+        // Robust Numeric Matching (1, 2, 3, 4, 5, ...)
+        // Check if any edge has 'source-N' format
+        const hasNumericOptions = outboundEdges.some(e => e.sourceHandle?.startsWith('source-') && /^\d+$/.test(e.sourceHandle.split('-')[1]));
+
+        if (hasNumericOptions) {
+            const body = messageBody.trim().toLowerCase();
+            // 1. Try exact numeric match
+            const match = body.match(/^\d+$/);
+            let choice = match ? match[0] : null;
+
+            // 2. Try matching by option text
+            const options = currentNode.data?.options || [];
+            if (!choice) {
+                const optIndex = options.findIndex(opt => opt.toLowerCase() === body);
+                if (optIndex !== -1) {
+                    choice = String(optIndex + 1);
+                }
+            }
+
+            // 3. Try matching "1." or "Option 1" (extract first number if simple)
+            if (!choice && body.length < 10) {
+                const simpleMatch = body.match(/\d+/);
+                if (simpleMatch) choice = simpleMatch[0];
+            }
+
+            if (choice) {
+                const chosenEdge = outboundEdges.find(e => e.sourceHandle === `source-${choice}`);
+                if (chosenEdge) {
+                    nextNodeId = chosenEdge.target;
+                } else {
+                    isValid = false;
+                }
+            } else {
+                isValid = false;
+            }
+        } else {
+            // Check for Green/Red generic validation
+            const greenEdge = outboundEdges.find(e => e.sourceHandle === 'source-green');
+            if (greenEdge) {
+                nextNodeId = greenEdge.target;
+            }
+        }
+
+        if (!isValid) {
+            const redEdge = outboundEdges.find(e => e.sourceHandle === 'source-red' || e.sourceHandle === 'source-invalid');
+            if (redEdge) {
+                await prisma.flowSession.update({
+                    where: { id: session.id },
+                    data: { currentStep: redEdge.target, status: 'active' }
+                });
+                await this.logAction(session.id, currentNode.id, nodeName, 'invalid_reply', `Resposta inválida: ${messageBody}`);
+                await this.executeStep({ ...session, currentStep: redEdge.target }, flow, config);
+                return;
+            } else {
+                await this.sendWhatsAppText(normalizedPhone, "Opção inválida. Por favor tente novamente.", config);
+                await this.logAction(session.id, currentNode.id, nodeName, 'invalid_reply', `"${messageBody}" - pedido para repetir`);
+                return;
+            }
+        }
+
+        if (nextNodeId) {
+            await this.logAction(session.id, currentNode.id, nodeName, 'received_reply', `Resposta recebida: "${messageBody}"`);
+            await prisma.flowSession.update({
+                where: { id: session.id },
+                data: { currentStep: nextNodeId, status: 'active' }
+            });
+            await this.executeStep({ ...session, currentStep: nextNodeId }, flow, config);
+        } else {
+            await this.endSession(session.id, 'Fluxo concluído - fim das opções');
+        }
+    },
+
+    async endSession(sessionId, reason = 'Fluxo concluído') {
+        await prisma.flowSession.update({
+            where: { id: sessionId },
+            data: { status: 'completed' }
+        });
+        await this.logAction(sessionId, null, null, 'completed', reason);
+    },
+
+    async sendWhatsAppText(phone, text, config) {
+        // Using the existing 'sendWhatsApp' logic adaptation or calling the API directly
+        // We duplicate simplified logic here to avoid dependency on global generic sendWhatsApp if it's strictly for Templates. 
+        // The existing 'sendWhatsApp' function is for TEMPLATES.
+        // We need TEXT message support.
+
+        const url = `https://graph.facebook.com/v20.0/${config.phoneId}/messages`;
+        const payload = {
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: phone,
+            type: "text",
+            text: { body: text }
+        };
+
+        try {
+            await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${config.token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+        } catch (e) {
+            console.error('[FLOW SEND ERROR]', e);
+        }
+    }
+};
+
 // --- WEBHOOK ---
 
 app.get('/webhook', (req, res) => {
@@ -843,6 +1341,11 @@ app.post('/webhook', async (req, res) => {
                         isRead: false
                     }
                 });
+
+                // Process Flow
+                if (text) {
+                    await FlowEngine.processMessage(from, text);
+                }
 
                 // Broadcast to all connected clients
                 wss.clients.forEach((client) => {
@@ -912,7 +1415,23 @@ app.get('/api/status/:userId', async (req, res) => {
     }
 });
 
+// --- IMAGE UPLOAD ---
+app.post('/api/upload-image', upload.single('image'), (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'Nenhuma imagem enviada' });
+        }
+        // Generate public URL for the uploaded file
+        const url = `/uploads/${req.file.filename}`;
+        res.json({ success: true, url, filename: req.file.filename });
+    } catch (err) {
+        console.error('[UPLOAD ERROR]', err);
+        res.status(500).json({ error: 'Erro ao fazer upload' });
+    }
+});
+
 // --- SERVE STATIC FILES ---
+app.use('/uploads', express.static(uploadsDir));
 app.use('/politics', express.static(path.join(__dirname, 'politics')));
 app.use(express.static(path.join(__dirname, 'dist')));
 
