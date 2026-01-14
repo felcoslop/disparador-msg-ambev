@@ -340,7 +340,8 @@ function AppContent() {
         setActiveContact,
         showToken,
         setShowToken,
-        addToast
+        addToast,
+        setReceivedMessages
     };
 
     return (
@@ -435,11 +436,9 @@ function LoginView({ onLogin, onSwitch }) {
                     <button type="submit" className="btn-primary w-full">Entrar</button>
                 </form>
                 <button className="btn-link" onClick={onSwitch}>Criar nova conta</button>
-                <div className="legal-footer">
-                    <div className="legal-footer-links">
-                        <a href="/politics/privacidade.html" target="_blank">Privacidade</a>
-                        <a href="/politics/termos.html" target="_blank">Termos</a>
-                    </div>
+                <div className="legal-footer-login">
+                    <a href="/politics/privacidade.html" target="_blank">Privacidade</a>
+                    <a href="/politics/termos.html" target="_blank">Termos de Uso</a>
                 </div>
             </div>
             <style>{`
@@ -479,11 +478,9 @@ function RegisterView({ onRegister, onSwitch }) {
                     <button type="submit" className="btn-primary w-full">Cadastrar</button>
                 </form>
                 <button className="btn-link" onClick={onSwitch}>Já tenho conta</button>
-                <div className="legal-footer">
-                    <div className="legal-footer-links">
-                        <a href="/politics/privacidade.html" target="_blank">Privacidade</a>
-                        <a href="/politics/termos.html" target="_blank">Termos</a>
-                    </div>
+                <div className="legal-footer-login">
+                    <a href="/politics/privacidade.html" target="_blank">Privacidade</a>
+                    <a href="/politics/termos.html" target="_blank">Termos de Uso</a>
                 </div>
             </div>
         </div>
@@ -584,7 +581,8 @@ function Dashboard({
     setActiveContact,
     showToken,
     setShowToken,
-    addToast
+    addToast,
+    setReceivedMessages
 }) {
     const [isEditing, setIsEditing] = useState(false);
     const [tempConfig, setTempConfig] = useState(config);
@@ -879,7 +877,7 @@ function Dashboard({
                 {activeTab === 'recebidas' && (
                     <div className="card ambev-flag fade-in">
                         <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                            <h2 style={{ margin: 0 }}>📥 Mensagens Recebidas</h2>
+                            <h2 style={{ margin: 0 }}>Mensagens Recebidas</h2>
                             <button
                                 className={`refresh-btn ${isRefreshing ? 'spinning' : ''}`}
                                 onClick={refreshMessages}
@@ -1051,14 +1049,6 @@ function Dashboard({
                 )}
             </main>
 
-            <footer className="legal-footer">
-                <div className="legal-footer-links">
-                    <a href="/politics/privacidade.html" target="_blank">Privacidade</a>
-                    <a href="/politics/termos.html" target="_blank">Termos de Uso</a>
-                </div>
-                <p className="legal-footer-text">Ambev S.A. &copy; 2026 - Logística e Atendimento</p>
-            </footer>
-
             <div className="mobile-nav">
                 <button className={`mobile-nav-item ${activeTab === 'disparos' ? 'active' : ''}`} onClick={() => setActiveTab('disparos')}>
                     <Send size={24} />
@@ -1078,9 +1068,11 @@ function Dashboard({
                 </button>
             </div>
 
-            {selectedLogDispatch && (
-                <LogModal dispatch={selectedLogDispatch} onClose={() => setSelectedLogDispatch(null)} />
-            )}
-        </div>
+            {
+                selectedLogDispatch && (
+                    <LogModal dispatch={selectedLogDispatch} onClose={() => setSelectedLogDispatch(null)} />
+                )
+            }
+        </div >
     );
 }
