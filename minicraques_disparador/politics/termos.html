@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Termos de Uso - tizap!</title>
+    <link rel="icon" type="image/png" href="/android-chrome-512x512.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Outfit:wght@300;400;600&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --primary: #280091;
+            /* tizap! Purple */
+            --secondary: #ffc200;
+            /* tizap! Yellow */
+            --accent: #ffc200;
+            --bg: #ffffff;
+            --card-bg: #ffffff;
+            --border: #e1e8ed;
+            --text: #333333;
+            --text-muted: #666666;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            overflow-x: hidden;
+            background-size: cover;
+            background-attachment: fixed;
+            background-position: center;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at 50% 50%, rgba(240, 244, 248, 0.5) 0%, rgba(255, 255, 255, 1) 100%);
+            z-index: -1;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 60px auto;
+            padding: 0 20px;
+        }
+
+        .glass-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 40px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+            border-top: 6px solid var(--primary);
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 50px;
+        }
+
+        .logo {
+            width: 140px;
+            height: auto;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin-bottom: 10px;
+            color: var(--primary);
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        section {
+            margin-bottom: 40px;
+        }
+
+        h2 {
+            font-size: 1.5rem;
+            color: var(--secondary);
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        h2::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: linear-gradient(90deg, var(--border), transparent);
+        }
+
+        p {
+            margin-bottom: 15px;
+            color: var(--text-muted);
+        }
+
+        ul {
+            list-style: none;
+            margin-bottom: 15px;
+        }
+
+        li {
+            margin-bottom: 10px;
+            padding-left: 20px;
+            position: relative;
+            color: var(--text-muted);
+        }
+
+        li::before {
+            content: '→';
+            position: absolute;
+            left: 0;
+            color: var(--accent);
+        }
+
+        .footer-info {
+            margin-top: 50px;
+            padding-top: 30px;
+            border-top: 1px solid var(--border);
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 30px;
+        }
+
+        .info-item h3 {
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--secondary);
+            margin-bottom: 10px;
+        }
+
+        .info-item p {
+            font-size: 0.95rem;
+            margin-bottom: 0;
+        }
+
+        .nav-links {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .nav-links a {
+            color: var(--text-muted);
+            text-decoration: none;
+            margin: 0 15px;
+            font-size: 0.9rem;
+            transition: color 0.3s;
+        }
+
+        .nav-links a:hover {
+            color: var(--accent);
+        }
+
+        .nav-links a.active {
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        @media (max-width: 600px) {
+            .glass-card {
+                padding: 25px;
+            }
+
+            h1 {
+                font-size: 1.8rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <nav class="nav-links">
+            <a href="privacidade.html">Privacidade</a>
+            <a href="termos.html" class="active">Termos de Uso</a>
+        </nav>
+
+        <header>
+            <img src="/logo.png" alt="tizap! Logo" class="logo">
+            <h1>Termos de Uso</h1>
+            <p class="subtitle">Comunicação inteligente para o seu negócio</p>
+        </header>
+
+        <div class="glass-card">
+            <section>
+                <h2>1. Aceitação dos Termos</h2>
+                <p>Ao utilizar a plataforma <strong>tizap!</strong>, você concorda plenamente com estes Termos de Uso.
+                    Este sistema é uma ferramenta de software (SaaS) destinada à automação de fluxos de conversas e
+                    disparos via WhatsApp API.</p>
+            </section>
+
+            <section>
+                <h2>2. Licença de Uso e Restrições</h2>
+                <p>Concedemos uma licença limitada, não exclusiva e intransferível para o uso da plataforma. É
+                    estritamente proibido:</p>
+                <ul>
+                    <li>Utilizar o sistema para fins ilícitos ou envio de SPAM.</li>
+                    <li>Tentar violar a segurança do sistema ou acessar dados de outros usuários.</li>
+                    <li>Utilizar tecnologias de raspagem (scraping) ou automações não oficiais que violem os termos do
+                        WhatsApp/Meta.</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>3. Responsabilidade pelo Conteúdo</h2>
+                <p>O usuário é o único responsável pelo conteúdo das mensagens disparadas e pelos dados dos contatos
+                    importados. O <strong>tizap!</strong> não monitora o conteúdo das mensagens, mas reserva-se o
+                    direito de suspender contas que violem as políticas do WhatsApp Business API.</p>
+            </section>
+
+            <section>
+                <h2>4. WhatsApp Business API</h2>
+                <p>A prestação do serviço depende da manutenção da conectividade com os servidores da Meta. O tizap! não
+                    se responsabiliza por eventuais instabilidades técnicas da infraestrutura do WhatsApp ou banimentos
+                    de números causados por mau uso da ferramenta pelo usuário.</p>
+            </section>
+
+            <section>
+                <h2>5. Pagamentos e Cancelamento</h2>
+                <p>O serviço é prestado sob o modelo de assinatura. O inadimplemento poderá resultar na suspensão
+                    temporária ou definitiva do acesso aos fluxos de automação.</p>
+            </section>
+
+            <div class="footer-info">
+                <div class="info-item">
+                    <h3>Empresa</h3>
+                    <p>tizap! Tecnologia</p>
+                    <p>SaaS de Mensageria Inteligente</p>
+                </div>
+                <div class="info-item">
+                    <h3>Atuação</h3>
+                    <p>Automação de Atendimento</p>
+                    <p>Vendas e Suporte via WhatsApp</p>
+                </div>
+                <div class="info-item">
+                    <h3>Suporte</h3>
+                    <p>suporte@tizap.com.br</p>
+                    <p>Segunda a Sexta, das 9h às 18h</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

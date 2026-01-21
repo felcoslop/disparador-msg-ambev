@@ -70,6 +70,7 @@ TEMPLATE_RESERVATION_POOL = os.getenv("TEMPLATE_RESERVATION_POOL", "reservation_
 TEMPLATE_RESERVATION_BBQ = os.getenv("TEMPLATE_RESERVATION_BBQ", "reservation_bbq")
 TEMPLATE_RESERVATION_PARKING = os.getenv("TEMPLATE_RESERVATION_PARKING", "reservation_parking")
 TEMPLATE_RESERVATION_PARKING_MONTHLY = os.getenv("TEMPLATE_RESERVATION_PARKING_MONTHLY", "reservation_parking_monthly")
+TEMPLATE_ANNOUNCEMENT = os.getenv("TEMPLATE_ANNOUNCEMENT", "aviso_morador")
 
 # --- Credenciais da API Evolution ANTIGAS (mantidas para referência) ---
 # EVOLUTION_API_URL = "https://evolution.felipecosta.me/message/sendText/village-liberdade"
@@ -634,6 +635,159 @@ def send_whatsapp_pdf(phone, pdf_path, caption, output_widget):
     except Exception as e:
         output_widget.print_message(f"ERRO INESPERADO: FALHA AO ENVIAR PDF: {e}", style="error")
         return False
+
+
+def upload_whatsapp_media(pdf_path, output_widget):
+    """
+    Faz o upload de um arquivo para os servidores da Meta e retorna o media_id.
+    Isso é útil para envios em massa, evitando fazer o upload para cada destinatário.
+    """
+    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+        output_widget.print_message("ERRO: CREDENCIAIS DA API WHATSAPP NÃO CONFIGURADAS NO ARQUIVO .ENV", style="error")
+        return None
+
+    if not os.path.exists(pdf_path):
+        output_widget.print_message(f"ERRO: ARQUIVO PDF NÃO ENCONTRADO: {pdf_path}", style="error")
+        return None
+
+    file_name = os.path.basename(pdf_path)
+
+    try:
+        upload_url = f"{WHATSAPP_API_BASE_URL}/{WHATSAPP_PHONE_NUMBER_ID}/media"
+        
+        with open(pdf_path, 'rb') as pdf_file:
+            files = {
+                'file': (file_name, pdf_file, 'application/pdf')
+            }
+            data = {
+                'messaging_product': 'whatsapp',
+                'type': 'application/pdf'
+            }
+            headers_upload = {
+                "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}"
+            }
+            
+            output_widget.print_message(f"FAZENDO UPLOAD DE ARQUIVO: {file_name}", style="info")
+            response = requests.post(upload_url, headers=headers_upload, files=files, data=data, timeout=60)
+        
+        if response.status_code in [200, 201]:
+            media_id = response.json().get('id')
+            if media_id:
+                output_widget.print_message("UPLOAD CONCLUÍDO COM SUCESSO!", style="success")
+                return media_id
+        
+        try:
+            error_msg = response.json().get('error', {}).get('message', 'Erro no upload')
+        except:
+            error_msg = f"Erro HTTP {response.status_code}"
+            
+        output_widget.print_message(f"ERRO NO UPLOAD: {error_msg}", style="error")
+        return None
+
+    except Exception as e:
+        output_widget.print_message(f"ERRO INESPERADO NO UPLOAD: {e}", style="error")
+        return None
+
+
+def send_whatsapp_document_template(phone, template_name, media_id, filename, caption_text, output_widget, status_callback=None, message_type='announcement'):
+    """
+    Envia um documento (PDF) usando um template aprovado com cabeçalho de documento.
+    """
+    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+        return {'success': False, 'reason': 'Credenciais não configuradas'}
+
+    # Formata o número de telefone
+    phone_number = phone.replace('+', '').replace(' ', '').replace('-', '')
+    if len(phone_number) == 11 or len(phone_number) == 10:
+        phone_number = f"55{phone_number}"
+    elif not phone_number.startswith('55') and len(phone_number) < 13:
+        phone_number = f"55{phone_number}"
+
+    url = f"{WHATSAPP_API_BASE_URL}/{WHATSAPP_PHONE_NUMBER_ID}/messages"
+    
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    # Payload para template com cabeçalho de documento
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone_number,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {
+                "code": "pt_BR"
+            },
+            "components": [
+                {
+                    "type": "header",
+                    "parameters": [
+                        {
+                            "type": "document",
+                            "document": {
+                                "id": media_id,
+                                "filename": filename
+                            }
+                        }
+                    ]
+                },
+                {
+                    "type": "body",
+                    "parameters": [
+                        {
+                            "type": "text",
+                            "text": caption_text
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+
+    result = {'success': False, 'reason': '', 'message_type': message_type}
+
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        
+        if response.status_code in [200, 201]:
+            result['success'] = True
+            return result
+        else:
+            try:
+                error_data = response.json()
+                error_msg = error_data.get('error', {}).get('message', 'Erro desconhecido')
+                result['reason'] = error_msg
+                
+                # Se a API estiver bloqueada, notifica
+                if "API ACCESS BLOCKED" in error_msg.upper():
+                    if status_callback:
+                        status_callback(False)
+                
+            except:
+                result['reason'] = f"Erro HTTP {response.status_code}"
+            
+            # Adiciona à fila de pendentes se falhar
+            add_pending_message(
+                phone=phone, 
+                message=None, 
+                message_type=message_type, 
+                template_name=template_name, 
+                template_params=[media_id, filename, caption_text]
+            )
+            return result
+
+    except Exception as e:
+        result['reason'] = str(e)
+        add_pending_message(
+            phone=phone, 
+            message=None, 
+            message_type=message_type, 
+            template_name=template_name, 
+            template_params=[media_id, filename, caption_text]
+        )
+        return result
 
 
 def save_last_reminder_timestamp():
@@ -3118,14 +3272,29 @@ def retry_pending_messages(output_widget=None):
 
     for message in messages_to_process:
         try:
-            # Se tem dados estruturados de template, usa send_whatsapp_template diretamente
+            # Se tem dados estruturados de template, usa a função correta
             if message.get('template_name') and message.get('template_params'):
-                result = send_whatsapp_template(
-                    message['phone'], 
-                    message['template_name'], 
-                    message['template_params'], 
-                    output_widget or DummyOutputWidget()
-                )
+                if message.get('message_type') == 'announcement':
+                    # Para avisos, template_params é a lista [media_id, filename, caption_text]
+                    params = message['template_params']
+                    result = send_whatsapp_document_template(
+                        phone=message['phone'],
+                        template_name=message['template_name'],
+                        media_id=params[0],
+                        filename=params[1],
+                        caption_text=params[2],
+                        output_widget=output_widget or DummyOutputWidget(),
+                        status_callback=None,
+                        message_type='announcement'
+                    )
+                else:
+                    # Formato padrão (package/reservation)
+                    result = send_whatsapp_template(
+                        message['phone'], 
+                        message['template_name'], 
+                        message['template_params'], 
+                        output_widget or DummyOutputWidget()
+                    )
             # Fallback para o antigo formato de string "TEMPLATE:name:params"
             elif message.get('message') and message['message'].startswith("TEMPLATE:"):
                 try:
@@ -3746,36 +3915,59 @@ class PackageSystemApp:
             self.output_text.print_message("ENVIO CANCELADO.", style="info")
 
     def _send_pdf_to_target_residents(self, pdf_path, caption, target_residents, target_description):
-        """Envia o PDF para os moradores do destino selecionado."""
+        """Envia o PDF para os moradores do destino selecionado usando templates se possível."""
         self.output_text.clear()
-        self.output_text.print_header("ENVIANDO PDF")
+        self.output_text.print_header("ENVIANDO AVISO (PDF)")
         self.output_text.print_styled("ARQUIVO", os.path.basename(pdf_path))
         self.output_text.print_styled("DESTINO", target_description)
         self.output_text.print_styled("TOTAL DE DESTINATÁRIOS", str(len(target_residents)))
         
+        # Passo 1: Upload único do PDF
+        media_id = upload_whatsapp_media(pdf_path, self.output_text)
+        
+        if not media_id:
+            self.output_text.print_message("❌ FALHA AO REALIZAR UPLOAD DO ARQUIVO. ENVIO CANCELADO.", style="error")
+            return
+
         success_count = 0
         error_count = 0
+        filename = os.path.basename(pdf_path)
         
         for index, resident in target_residents.iterrows():
-            self.output_text.print_styled("ENVIANDO PARA", f"{resident['name'].upper()} ({resident['phone']})")
-            self.output_text.print_styled("BLOCO/APT", f"{resident['block']}/{resident['apartment']}")
+            phone = resident['phone']
+            name = resident['name'].upper()
             
-            if send_whatsapp_pdf(resident['phone'], pdf_path, caption, self.output_text):
+            self.output_text.print_styled("ENVIANDO PARA", f"{name} ({phone})")
+            
+            # Tenta enviar via template de aviso
+            # Se o template não existir no .env ou no Meta, ele vai falhar e cair na fila de pendentes
+            send_result = send_whatsapp_document_template(
+                phone=phone,
+                template_name=TEMPLATE_ANNOUNCEMENT,
+                media_id=media_id,
+                filename=filename,
+                caption_text=caption,
+                output_widget=self.output_text,
+                status_callback=self._check_api_status_on_error
+            )
+            
+            if send_result['success']:
+                self.output_text.print_message(f"  ✅ AVISO ENVIADO COM SUCESSO!", style="success")
                 success_count += 1
             else:
+                self.output_text.print_message(f"  ⚠️  FALHA NO ENVIO: {send_result['reason']}", style="error")
                 error_count += 1
             
-            # Pequena pausa entre envios para não sobrecarregar a API
-            self.root.after(1000)
+            # Pequena pausa entre envios
+            self.root.after(500)
             self.root.update()
         
         # Resumo final
         self.output_text.print_separator("=")
         self.output_text.print_subheader("RESUMO DO ENVIO")
         self.output_text.print_styled("DESTINO", target_description)
-        self.output_text.print_styled("TOTAL ENVIADO", str(success_count), style="success")
-        self.output_text.print_styled("ERROS", str(error_count), style="error")
-        self.output_text.print_styled("ARQUIVO", os.path.basename(pdf_path))
+        self.output_text.print_styled("SUCESSO", str(success_count), style="success")
+        self.output_text.print_styled("ERROS/PENDENTES", str(error_count), style="error")
         
         # Botão para voltar
         back_btn = tk.Button(

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+*.sqlite
+*.zip
+.DS_Store
+uploads/
+*.log
+debug_output.txt
+.env

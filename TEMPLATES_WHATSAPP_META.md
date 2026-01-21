@@ -56,7 +56,14 @@ Prezado(a) JOÃO SILVA, uma encomenda (BR123456789) chegou e está disponível p
 
 ### Corpo da Mensagem:
 ```
-Prezado(a) {{nome_morador}}, sua encomenda ({{codigo_rastreamento}}) foi retirada em {{data_hora_retirada}}.
+Prezado(a) {{nome_morador}},
+
+A portaria do condomínio registra a retirada bem-sucedida da encomenda {{codigo_rastreamento}}.
+
+Data e horário: {{data_hora_retirada}}.
+
+Em caso de dúvidas, contate a portaria.
+(NÃO RESPONDA ESTA MENSAGEM)
 ```
 
 ### Variáveis:
@@ -68,7 +75,14 @@ Prezado(a) {{nome_morador}}, sua encomenda ({{codigo_rastreamento}}) foi retirad
 
 ### Exemplo Preenchido:
 ```
-Prezado(a) MARIA SANTOS, sua encomenda (BR987654321) foi retirada em 04/01/2026 às 14:30.
+Prezado(a) MARIA SANTOS,
+
+A portaria do condomínio registra a retirada bem-sucedida da encomenda BR987654321.
+
+Data e horário: 04/01/2026 às 14:30.
+
+Em caso de dúvidas, contate a portaria.
+(NÃO RESPONDA ESTA MENSAGEM)
 ```
 
 ---

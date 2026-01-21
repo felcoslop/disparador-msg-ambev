@@ -1,0 +1,119 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  Int         @id @default(autoincrement())
+  email               String      @unique
+  name                String?
+  password            String?
+  isVerified          Boolean     @default(false)
+  verificationToken   String?
+  verificationExpires DateTime?
+  googleId            String?     @unique
+  avatar              String?
+  resetPasswordToken   String?
+  resetPasswordExpires DateTime?
+  createdAt           DateTime    @default(now())
+  dispatches          Dispatch[]
+  config              UserConfig?
+  flows               Flow[]
+}
+
+model UserConfig {
+  id           Int    @id @default(autoincrement())
+  userId       Int    @unique
+  token        String @default("")
+  phoneId      String @default("")
+  wabaId       String @default("")
+  templateName       String @default("")
+  mapping            String @default("{}")
+  webhookVerifyToken String @default("")
+  user         User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Dispatch {
+  id           Int           @id @default(autoincrement())
+  userId       Int
+  templateName String
+  dateOld      String
+  dateNew      String
+  status       String        @default("idle")
+  totalLeads   Int           @default(0)
+  currentIndex Int           @default(0)
+  successCount Int           @default(0)
+  errorCount   Int           @default(0)
+  leadsData    String        @default("[]")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  dispatchType String        @default("template") // "template" or "flow"
+  flowId       Int?
+  variables    String?       @default("[]") // JSON array of variable values
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  logs         DispatchLog[]
+}
+
+model DispatchLog {
+  id         Int      @id @default(autoincrement())
+  dispatchId Int
+  phone      String
+  status     String
+  message    String?
+  createdAt  DateTime @default(now())
+  dispatch   Dispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+}
+
+model ReceivedMessage {
+  id              Int      @id @default(autoincrement())
+  whatsappPhoneId String   @default("")
+  contactPhone    String
+  contactName     String
+  messageBody     String
+  isFromMe        Boolean  @default(false)
+  isRead          Boolean  @default(false)
+  mediaUrl        String?
+  mediaType       String?  // image, audio, video, document
+  mediaId         String?
+  createdAt       DateTime @default(now())
+}
+
+model Flow {
+  id        Int           @id @default(autoincrement())
+  userId    Int
+  name      String
+  nodes     String        @default("[]") // JSON
+  edges     String        @default("[]") // JSON
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions  FlowSession[]
+}
+
+model FlowSession {
+  id           Int              @id @default(autoincrement())
+  flowId       Int
+  contactPhone String
+  currentStep  String? // Node ID
+  status       String           @default("active") // active, waiting_reply, completed, error
+  variables    String           @default("{}")
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  flow         Flow             @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  logs         FlowSessionLog[]
+}
+
+model FlowSessionLog {
+  id        Int         @id @default(autoincrement())
+  sessionId Int
+  nodeId    String?
+  nodeName  String?
+  action    String // sent_message, waiting_reply, received_reply, completed, error
+  details   String? // JSON or text details
+  createdAt DateTime    @default(now())
+  session   FlowSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
